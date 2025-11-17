@@ -1,0 +1,19 @@
+{
+    "name": "auth-service",
+    "version": "1.0.0",
+    "description": "Authentication service for distributed system",
+    "main": "auth-server.js",
+    "scripts": {
+      "start": "node auth-server.js",
+      "dev": "nodemon auth-server.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2",
+      "jsonwebtoken": "^9.0.2",
+      "bcryptjs": "^2.4.3",
+      "mongoose": "^7.5.0"
+    },
+    "devDependencies": {
+      "nodemon": "^3.0.1"
+    }
+  }

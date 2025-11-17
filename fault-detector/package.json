@@ -1,0 +1,17 @@
+{
+    "name": "fault-detector",
+    "version": "1.0.0",
+    "description": "Fault detection and monitoring service",
+    "main": "fault-detector.js",
+    "scripts": {
+      "start": "node fault-detector.js",
+      "dev": "nodemon fault-detector.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2",
+      "axios": "^1.5.0"
+    },
+    "devDependencies": {
+      "nodemon": "^3.0.1"
+    }
+  }

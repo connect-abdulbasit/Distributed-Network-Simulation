@@ -1,0 +1,17 @@
+{
+    "name": "load-balancer",
+    "version": "1.0.0",
+    "description": "Load balancer for distributed system",
+    "main": "load-balancer.js",
+    "scripts": {
+      "start": "node load-balancer.js",
+      "dev": "nodemon load-balancer.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2",
+      "axios": "^1.5.0"
+    },
+    "devDependencies": {
+      "nodemon": "^3.0.1"
+    }
+  }

@@ -1,0 +1,17 @@
+{
+    "name": "data-service",
+    "version": "1.0.0",
+    "description": "Data management service for distributed system",
+    "main": "data-server.js",
+    "scripts": {
+      "start": "node data-server.js",
+      "dev": "nodemon data-server.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2",
+      "mongoose": "^7.5.0"
+    },
+    "devDependencies": {
+      "nodemon": "^3.0.1"
+    }
+  }

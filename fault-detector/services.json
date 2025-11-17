@@ -1,0 +1,22 @@
+{
+    "services": {
+      "auth": [
+        { "name": "auth-service-1", "url": "http://auth-service-1:3001" },
+        { "name": "auth-service-2", "url": "http://auth-service-2:3001" },
+        { "name": "auth-service-3", "url": "http://auth-service-3:3001" }
+      ],
+      "data": [
+        { "name": "data-service-1", "url": "http://data-service-1:3002" },
+        { "name": "data-service-2", "url": "http://data-service-2:3002" },
+        { "name": "data-service-3", "url": "http://data-service-3:3002" }
+      ],
+      "compute": [
+        { "name": "compute-service-1", "url": "http://compute-service-1:3003" },
+        { "name": "compute-service-2", "url": "http://compute-service-2:3003" },
+        { "name": "compute-service-3", "url": "http://compute-service-3:3003" }
+      ],
+      "loadbalancer": [
+        { "name": "load-balancer", "url": "http://load-balancer:3000" }
+      ]
+    }
+  }
