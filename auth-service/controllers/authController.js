@@ -130,10 +130,7 @@ exports.getProfile = async (req, res) => {
     }
 
     const decoded = jwt.verifyToken(token);
-    const user = await localDb.findOne(
-      USERS_COLLECTION,
-      record => record.email === decoded.email
-    );
+    const user = await localDb.getUserByEmail(decoded.email);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

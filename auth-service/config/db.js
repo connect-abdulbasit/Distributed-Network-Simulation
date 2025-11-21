@@ -60,4 +60,3 @@ exports.disconnectDB = async () => {
     isConnected = false;
   }
 };
-exports.getConnectionStatus = () => isConnected;
