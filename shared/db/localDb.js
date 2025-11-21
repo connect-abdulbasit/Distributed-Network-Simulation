@@ -209,6 +209,71 @@ class LocalDB {
     return item;
   }
 
+  // Atomic insert that fails if key already exists (for create operations)
+  // This performs the check and insert atomically within the same write transaction
+  async insertDataItem(item) {
+    let inserted = false;
+    await this.withWrite(async (db) => {
+      // Use a prepared statement to check if key exists atomically
+      const checkStmt = db.prepare('SELECT data_key FROM data_items WHERE data_key = ?');
+      checkStmt.bind([item.key]);
+      
+      try {
+        // Check if key exists
+        if (checkStmt.step()) {
+          // Key already exists
+          checkStmt.free();
+          const error = new Error('Key already exists');
+          error.code = 'SQLITE_CONSTRAINT_UNIQUE';
+          throw error;
+        }
+        checkStmt.free();
+
+        // Key doesn't exist, insert it
+        const insertStmt = db.prepare(
+          `INSERT INTO data_items (id, data_key, value_json, metadata_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        );
+        insertStmt.bind([
+          item.id,
+          item.key,
+          JSON.stringify(item.value ?? null),
+          JSON.stringify(item.metadata ?? {}),
+          item.createdAt,
+          item.updatedAt
+        ]);
+        
+        try {
+          insertStmt.step();
+          inserted = true;
+        } catch (insertError) {
+          // If insert fails due to unique constraint (race condition caught by DB)
+          if (insertError.message && insertError.message.includes('UNIQUE')) {
+            const uniqueError = new Error('Key already exists');
+            uniqueError.code = 'SQLITE_CONSTRAINT_UNIQUE';
+            throw uniqueError;
+          }
+          throw insertError;
+        } finally {
+          insertStmt.free();
+        }
+      } catch (error) {
+        // Re-throw our custom error
+        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+          throw error;
+        }
+        // For other errors, check if it's a unique constraint violation
+        if (error.message && error.message.includes('UNIQUE')) {
+          const uniqueError = new Error('Key already exists');
+          uniqueError.code = 'SQLITE_CONSTRAINT_UNIQUE';
+          throw uniqueError;
+        }
+        throw error;
+      }
+    });
+    return { item, inserted };
+  }
+
   async getDataItemByKey(key) {
     const row = await this.runGet(
       'SELECT * FROM data_items WHERE data_key = ?',

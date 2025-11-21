@@ -573,6 +573,45 @@ curl http://localhost:3003/health
 
 ---
 
+## Load Testing
+
+### Using the Load Test Script
+
+Test the load balancer with multiple requests per second:
+
+```bash
+# Basic test (10 requests/second for 30 seconds)
+node load-test.js
+
+# High load test (50 requests/second for 60 seconds)
+RPS=50 DURATION=60 node load-test.js
+
+# Test specific endpoint
+ENDPOINT=/api/auth/register node load-test.js
+
+# Test with custom load balancer URL
+LB_URL=http://localhost:3000 RPS=20 DURATION=45 node load-test.js
+
+# View help
+node load-test.js --help
+```
+
+### Load Test Options
+
+- `LB_URL`: Load balancer URL (default: `http://localhost:3000`)
+- `RPS`: Requests per second (default: `10`)
+- `DURATION`: Test duration in seconds (default: `30`)
+- `ENDPOINT`: Endpoint to test (default: `/health`)
+
+### Example Output
+
+The load test script provides:
+- Real-time progress bar
+- Request statistics (total, success, failed, errors)
+- Response time metrics (average, min, max, P50, P95, P99)
+- Status code distribution
+- Actual requests per second achieved
+
 ## Notes
 
 - All services share the same SQLite database file (`data/local-db.sqlite`)
@@ -580,3 +619,8 @@ curl http://localhost:3003/health
 - Health checks are used by load balancer and fault detector for routing decisions
 - The database file is created automatically on first use
 - For production, consider using MongoDB Atlas or a proper database server
+- Load balancer logs are color-coded for better readability:
+  - 🟢 Green: Success/Healthy services
+  - 🟡 Yellow: Warnings/Failed requests
+  - 🔴 Red: Errors/Unhealthy services
+  - 🔵 Blue: Info messages

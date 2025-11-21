@@ -1,0 +1,24 @@
+{
+  "name": "distributed-network-simulation",
+  "version": "1.0.0",
+  "description": "A distributed microservices system demonstrating load balancing, fault tolerance, and shared data persistence using local SQLite database.",
+  "main": "data-server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/connect-abdulbasit/Distributed-Network-Simulation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/connect-abdulbasit/Distributed-Network-Simulation/issues"
+  },
+  "homepage": "https://github.com/connect-abdulbasit/Distributed-Network-Simulation#readme",
+  "dependencies": {
+    "axios": "^1.13.2"
+  }
+}

@@ -6,6 +6,63 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m'
+};
+
+
+const logger = {
+  timestamp: () => {
+    const now = new Date();
+    return now.toISOString().replace('T', ' ').substring(0, 19);
+  },
+  
+  info: (message) => {
+    console.log(`${colors.cyan}[${logger.timestamp()}]${colors.reset} ${colors.bright}ℹ${colors.reset}  ${message}`);
+  },
+  
+  success: (message) => {
+    console.log(`${colors.green}[${logger.timestamp()}]${colors.reset} ${colors.bright}✓${colors.reset}  ${message}`);
+  },
+  
+  warning: (message) => {
+    console.log(`${colors.yellow}[${logger.timestamp()}]${colors.reset} ${colors.bright}⚠${colors.reset}  ${message}`);
+  },
+  
+  error: (message) => {
+    console.log(`${colors.red}[${logger.timestamp()}]${colors.reset} ${colors.bright}✗${colors.reset}  ${message}`);
+  },
+  
+  request: (method, path, serviceUrl, statusCode, responseTime, port = null) => {
+    const statusColor = statusCode >= 500 ? colors.red : 
+                       statusCode >= 400 ? colors.yellow : 
+                       colors.green;
+    const methodColor = method === 'GET' ? colors.blue : 
+                       method === 'POST' ? colors.green : 
+                       method === 'PUT' ? colors.yellow : 
+                       method === 'DELETE' ? colors.red : colors.white;
+    
+    const portDisplay = port ? ` ${colors.cyan}[port ${port}]${colors.reset}` : '';
+    console.log(
+      `${colors.dim}[${logger.timestamp()}]${colors.reset} ` +
+      `${methodColor}${method.padEnd(6)}${colors.reset} ` +
+      `${colors.cyan}${path}${colors.reset} ` +
+      `→ ${colors.magenta}${serviceUrl}${colors.reset}${portDisplay} ` +
+      `${statusColor}${statusCode}${colors.reset} ` +
+      `${colors.dim}(${responseTime}ms)${colors.reset}`
+    );
+  }
+};
+
 // Service registry with health status
 // Use environment variable to determine if running in Docker or locally
 const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
@@ -16,18 +73,31 @@ const AUTH_PORTS = process.env.AUTH_PORTS ?
   process.env.AUTH_PORTS.split(',').map(p => parseInt(p.trim())) : 
   [3001, 3002, 3003];
 
+// Data and compute services use different ports to avoid conflicts with auth services
+const DATA_PORTS = process.env.DATA_PORTS ? 
+  process.env.DATA_PORTS.split(',').map(p => parseInt(p.trim())) : 
+  [4002]; // Use 4002 instead of 3002 to avoid conflict with auth-service-2
+
+const COMPUTE_PORTS = process.env.COMPUTE_PORTS ? 
+  process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) : 
+  [4003]; // Use 4003 instead of 3003 to avoid conflict with auth-service-3
+
 const services = {
   auth: AUTH_PORTS.map(port => ({
     url: `http://${SERVICE_HOST}:${port}`,
     healthy: true,
     failures: 0
   })),
-  data: [
-    { url: `http://${SERVICE_HOST}:3002`, healthy: true, failures: 0 }
-  ],
-  compute: [
-    { url: `http://${SERVICE_HOST}:3003`, healthy: true, failures: 0 }
-  ]
+  data: DATA_PORTS.map(port => ({
+    url: `http://${SERVICE_HOST}:${port}`,
+    healthy: true,
+    failures: 0
+  })),
+  compute: COMPUTE_PORTS.map(port => ({
+    url: `http://${SERVICE_HOST}:${port}`,
+    healthy: true,
+    failures: 0
+  }))
 };
 
 // Round-robin counters
@@ -64,44 +134,75 @@ function markServiceUnhealthy(serviceType, serviceUrl) {
     service.failures++;
     if (service.failures >= MAX_FAILURES) {
       service.healthy = false;
-      console.log(`[LOAD BALANCER] Marked ${serviceUrl} as unhealthy`);
+      logger.error(`Service ${colors.magenta}${serviceUrl}${colors.reset} marked as ${colors.red}UNHEALTHY${colors.reset} (${service.failures} consecutive failures)`);
+    } else {
+      logger.warning(`Service ${colors.magenta}${serviceUrl}${colors.reset} has ${colors.yellow}${service.failures}${colors.reset} failures (threshold: ${MAX_FAILURES})`);
     }
   }
 }
 
 // Health check all services
 async function healthCheck() {
-  console.log('[LOAD BALANCER] Running health checks...');
+  // Only log health checks for auth services, suppress others
+  let healthyCount = 0;
+  let unhealthyCount = 0;
 
   for (const [serviceType, serviceList] of Object.entries(services)) {
     for (const service of serviceList) {
       try {
+        const startTime = Date.now();
         const response = await axios.get(`${service.url}/health`, {
           timeout: 3000
         });
+        const responseTime = Date.now() - startTime;
 
         if (response.status === 200) {
+          const wasUnhealthy = !service.healthy;
           service.healthy = true;
           service.failures = 0;
-          console.log(`[LOAD BALANCER] ${service.url} is healthy`);
+          
+          // Only log auth services
+          if (serviceType === 'auth') {
+            const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
+            if (wasUnhealthy) {
+              logger.success(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} ${colors.green}RECOVERED${colors.reset} (${responseTime}ms)`);
+            }
+            // Don't log healthy status for auth services to reduce noise
+          }
+          healthyCount++;
         }
       } catch (error) {
         service.failures++;
         if (service.failures >= MAX_FAILURES) {
           service.healthy = false;
+          unhealthyCount++;
         }
-        console.log(`[LOAD BALANCER] ${service.url} health check failed:`, error.message);
+        // Only log failures for auth services
+        if (serviceType === 'auth') {
+          const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
+          logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message}`);
+        }
       }
     }
   }
+  
+  // Only show summary for auth services
+  const authServices = services.auth || [];
+  const authHealthy = authServices.filter(s => s.healthy).length;
+  const authTotal = authServices.length;
+  
+  if (authHealthy < authTotal) {
+    logger.warning(`AUTH services: ${colors.green}${authHealthy}${colors.reset}/${colors.yellow}${authTotal}${colors.reset} healthy`);
+  }
 }
 
-// Start periodic health checks
-setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
+// Start periodic health checks (less frequent to reduce noise)
+setInterval(healthCheck, HEALTH_CHECK_INTERVAL * 2); // Check every 20 seconds instead of 10
 healthCheck(); // Run immediately on startup
 
 // Proxy request to service
 async function proxyRequest(req, res, serviceType) {
+  const requestStartTime = Date.now();
   let attempts = 0;
   const maxAttempts = 3;
 
@@ -109,8 +210,7 @@ async function proxyRequest(req, res, serviceType) {
     try {
       const service = getNextHealthyService(serviceType);
       const targetUrl = `${service.url}${req.path}`;
-
-      console.log(`[LOAD BALANCER] Routing ${req.method} ${req.path} to ${service.url} (attempt ${attempts + 1})`);
+      const attemptStartTime = Date.now();
 
       const response = await axios({
         method: req.method,
@@ -124,14 +224,23 @@ async function proxyRequest(req, res, serviceType) {
         validateStatus: () => true // Accept any status code
       });
 
+      const responseTime = Date.now() - attemptStartTime;
+      const totalTime = Date.now() - requestStartTime;
+
       // Mark service as healthy on successful request
-      service.failures = 0;
+      if (service.failures > 0) {
+        service.failures = 0;
+      }
+
+      // Log the request with port number highlighted
+      const port = new URL(service.url).port;
+      logger.request(req.method, req.path, service.url, response.status, responseTime, port);
 
       return res.status(response.status).json(response.data);
 
     } catch (error) {
       attempts++;
-      console.error(`[LOAD BALANCER] Request failed (attempt ${attempts}):`, error.message);
+      const responseTime = Date.now() - requestStartTime;
 
       if (error.config?.url) {
         const failedUrl = new URL(error.config.url).origin;
@@ -139,12 +248,15 @@ async function proxyRequest(req, res, serviceType) {
       }
 
       if (attempts >= maxAttempts) {
+        logger.error(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed after ${maxAttempts} attempts (${responseTime}ms)`);
         return res.status(503).json({
           error: 'Service unavailable',
           message: `Failed to reach ${serviceType} service after ${maxAttempts} attempts`,
           timestamp: new Date().toISOString()
         });
       }
+
+      logger.warning(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed (attempt ${attempts}/${maxAttempts}): ${error.message}`);
 
       // Wait before retry
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -157,29 +269,35 @@ app.all('/api/auth/*', (req, res) => proxyRequest(req, res, 'auth'));
 app.all('/api/data/*', (req, res) => proxyRequest(req, res, 'data'));
 app.all('/api/compute/*', (req, res) => proxyRequest(req, res, 'compute'));
 
-// Load balancer health endpoint
+// Load balancer health endpoint - proxy to auth services for load testing
 app.get('/health', (req, res) => {
-  const healthStatus = {};
-  
-  for (const [serviceType, serviceList] of Object.entries(services)) {
-    healthStatus[serviceType] = {
-      total: serviceList.length,
-      healthy: serviceList.filter(s => s.healthy).length,
-      unhealthy: serviceList.filter(s => !s.healthy).length,
-      services: serviceList.map(s => ({
-        url: s.url,
-        healthy: s.healthy,
-        failures: s.failures
-      }))
-    };
-  }
+  // If query param ?lb=true, return load balancer health status
+  if (req.query.lb === 'true') {
+    const healthStatus = {};
+    
+    for (const [serviceType, serviceList] of Object.entries(services)) {
+      healthStatus[serviceType] = {
+        total: serviceList.length,
+        healthy: serviceList.filter(s => s.healthy).length,
+        unhealthy: serviceList.filter(s => !s.healthy).length,
+        services: serviceList.map(s => ({
+          url: s.url,
+          healthy: s.healthy,
+          failures: s.failures
+        }))
+      };
+    }
 
-  res.json({
-    status: 'healthy',
-    loadBalancer: 'operational',
-    timestamp: new Date().toISOString(),
-    services: healthStatus
-  });
+    return res.json({
+      status: 'healthy',
+      loadBalancer: 'operational',
+      timestamp: new Date().toISOString(),
+      services: healthStatus
+    });
+  }
+  
+  // Otherwise proxy to auth service (for load testing distribution)
+  proxyRequest(req, res, 'auth');
 });
 
 // Service status endpoint
@@ -193,7 +311,7 @@ app.get('/status', (req, res) => {
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error('[LOAD BALANCER] Error:', err);
+  logger.error(`Internal error: ${err.message}`);
   res.status(500).json({
     error: 'Load balancer error',
     message: err.message
@@ -201,9 +319,22 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[LOAD BALANCER] Running on port ${PORT}`);
-  console.log('[LOAD BALANCER] Service configuration:');
-  console.log(JSON.stringify(services, null, 2));
+  console.log('\n' + '='.repeat(60));
+  logger.success(`${colors.bright}Load Balancer started${colors.reset}`);
+  logger.info(`Listening on port ${colors.cyan}${PORT}${colors.reset}`);
+  console.log('='.repeat(60));
+  
+  logger.info(`${colors.bright}Service Configuration:${colors.reset}`);
+  for (const [serviceType, serviceList] of Object.entries(services)) {
+    console.log(`  ${colors.blue}${serviceType.toUpperCase()}${colors.reset}:`);
+    serviceList.forEach((service, index) => {
+      const status = service.healthy ? 
+        `${colors.green}●${colors.reset} healthy` : 
+        `${colors.red}●${colors.reset} unhealthy`;
+      console.log(`    ${index + 1}. ${colors.magenta}${service.url}${colors.reset} - ${status}`);
+    });
+  }
+  console.log('='.repeat(60) + '\n');
 });
 
 module.exports = app;
