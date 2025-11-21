@@ -1,5 +1,5 @@
-// In-memory data store (replace with database in production)
-const dataStore = new Map();
+const path = require('path');
+const localDb = require(path.join(__dirname, '../../shared/db/localDb'));
 
 exports.createData = async (req, res) => {
   try {
@@ -7,6 +7,11 @@ exports.createData = async (req, res) => {
 
     if (!key || !value) {
       return res.status(400).json({ error: 'Key and value are required' });
+    }
+
+    const existingData = await localDb.getDataItemByKey(key);
+    if (existingData) {
+      return res.status(409).json({ error: 'Key already exists' });
     }
 
     const dataItem = {
@@ -18,7 +23,7 @@ exports.createData = async (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    dataStore.set(key, dataItem);
+    await localDb.saveDataItem(dataItem);
 
     res.status(201).json({
       message: 'Data created successfully',
@@ -34,7 +39,7 @@ exports.getData = async (req, res) => {
   try {
     const { key } = req.params;
 
-    const dataItem = dataStore.get(key);
+    const dataItem = await localDb.getDataItemByKey(key);
     if (!dataItem) {
       return res.status(404).json({ error: 'Data not found' });
     }
@@ -51,7 +56,7 @@ exports.getData = async (req, res) => {
 
 exports.getAllData = async (req, res) => {
   try {
-    const allData = Array.from(dataStore.values());
+    const allData = await localDb.getAllDataItems();
     
     res.json({
       message: 'Data retrieved successfully',
@@ -69,20 +74,23 @@ exports.updateData = async (req, res) => {
     const { key } = req.params;
     const { value, metadata } = req.body;
 
-    const dataItem = dataStore.get(key);
+    const dataItem = await localDb.getDataItemByKey(key);
     if (!dataItem) {
       return res.status(404).json({ error: 'Data not found' });
     }
 
-    dataItem.value = value || dataItem.value;
-    dataItem.metadata = metadata || dataItem.metadata;
-    dataItem.updatedAt = new Date().toISOString();
+    const updatedItem = {
+      ...dataItem,
+      value: value !== undefined ? value : dataItem.value,
+      metadata: metadata !== undefined ? metadata : dataItem.metadata,
+      updatedAt: new Date().toISOString()
+    };
 
-    dataStore.set(key, dataItem);
+    await localDb.saveDataItem(updatedItem);
 
     res.json({
       message: 'Data updated successfully',
-      data: dataItem
+      data: updatedItem
     });
   } catch (error) {
     console.error('Update data error:', error);
@@ -94,11 +102,11 @@ exports.deleteData = async (req, res) => {
   try {
     const { key } = req.params;
 
-    if (!dataStore.has(key)) {
+    const deleted = await localDb.deleteDataItemByKey(key);
+
+    if (!deleted) {
       return res.status(404).json({ error: 'Data not found' });
     }
-
-    dataStore.delete(key);
 
     res.json({
       message: 'Data deleted successfully'

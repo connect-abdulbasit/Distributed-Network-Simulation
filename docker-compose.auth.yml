@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  auth-service-1:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service-1
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - SERVICE_NAME=auth-service-1
+      - JWT_SECRET=your-super-secret-jwt-key-change-this
+      - JWT_EXPIRY=24h
+      - MONGODB_URI=mongodb://mongo:27017/auth-service
+      - NODE_ENV=development
+    depends_on:
+      - mongo
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  auth-service-2:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service-2
+    ports:
+      - "3002:3001"
+    environment:
+      - PORT=3001
+      - SERVICE_NAME=auth-service-2
+      - JWT_SECRET=your-super-secret-jwt-key-change-this
+      - JWT_EXPIRY=24h
+      - MONGODB_URI=mongodb://mongo:27017/auth-service
+      - NODE_ENV=development
+    depends_on:
+      - mongo
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  auth-service-3:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service-3
+    ports:
+      - "3003:3001"
+    environment:
+      - PORT=3001
+      - SERVICE_NAME=auth-service-3
+      - JWT_SECRET=your-super-secret-jwt-key-change-this
+      - JWT_EXPIRY=24h
+      - MONGODB_URI=mongodb://mongo:27017/auth-service
+      - NODE_ENV=development
+    depends_on:
+      - mongo
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  mongo:
+    image: mongo:7
+    container_name: auth-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - distributed-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  distributed-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+

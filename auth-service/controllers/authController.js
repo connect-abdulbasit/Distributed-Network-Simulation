@@ -1,8 +1,8 @@
 const jwt = require('../utils/jwt');
 const bcrypt = require('bcryptjs');
+const path = require('path');
 
-// In-memory user store (replace with database in production)
-const users = new Map();
+const localDb = require(path.join(__dirname, '../../shared/db/localDb'));
 
 exports.register = async (req, res) => {
   try {
@@ -25,7 +25,8 @@ exports.register = async (req, res) => {
     }
 
     // Check if user exists
-    if (users.has(email)) {
+    const existingUser = await localDb.getUserByEmail(email);
+    if (existingUser) {
       return res.status(409).json({ error: 'User already exists' });
     }
 
@@ -40,7 +41,7 @@ exports.register = async (req, res) => {
       password: hashedPassword,
       createdAt: new Date().toISOString()
     };
-    users.set(email, user);
+    await localDb.saveUser(user);
 
     // Generate token
     const token = jwt.generateToken({ id: user.id, email: user.email });
@@ -66,7 +67,7 @@ exports.login = async (req, res) => {
     }
 
     // Find user
-    const user = users.get(email);
+    const user = await localDb.getUserByEmail(email);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -100,9 +101,19 @@ exports.verify = async (req, res) => {
     }
 
     const decoded = jwt.verifyToken(token);
+    const user = await localDb.getUserByEmail(decoded.email);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found', valid: false });
+    }
+
     res.json({
       valid: true,
-      user: decoded
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      }
     });
   } catch (error) {
     res.status(401).json({ error: 'Invalid token', valid: false });
@@ -119,7 +130,10 @@ exports.getProfile = async (req, res) => {
     }
 
     const decoded = jwt.verifyToken(token);
-    const user = users.get(decoded.email);
+    const user = await localDb.findOne(
+      USERS_COLLECTION,
+      record => record.email === decoded.email
+    );
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
