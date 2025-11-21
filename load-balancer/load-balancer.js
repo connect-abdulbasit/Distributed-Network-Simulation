@@ -7,21 +7,26 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // Service registry with health status
+// Use environment variable to determine if running in Docker or locally
+const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
+
+// For local development: auth services use ports 3001, 3002, 3003
+// For Docker: set SERVICE_HOST to service name (e.g., 'auth-service-1') and use port 3001
+const AUTH_PORTS = process.env.AUTH_PORTS ? 
+  process.env.AUTH_PORTS.split(',').map(p => parseInt(p.trim())) : 
+  [3001, 3002, 3003];
+
 const services = {
-  auth: [
-    { url: 'http://auth-service-1:3001', healthy: true, failures: 0 },
-    { url: 'http://auth-service-2:3001', healthy: true, failures: 0 },
-    { url: 'http://auth-service-3:3001', healthy: true, failures: 0 }
-  ],
+  auth: AUTH_PORTS.map(port => ({
+    url: `http://${SERVICE_HOST}:${port}`,
+    healthy: true,
+    failures: 0
+  })),
   data: [
-    { url: 'http://data-service-1:3002', healthy: true, failures: 0 },
-    { url: 'http://data-service-2:3002', healthy: true, failures: 0 },
-    { url: 'http://data-service-3:3002', healthy: true, failures: 0 }
+    { url: `http://${SERVICE_HOST}:3002`, healthy: true, failures: 0 }
   ],
   compute: [
-    { url: 'http://compute-service-1:3003', healthy: true, failures: 0 },
-    { url: 'http://compute-service-2:3003', healthy: true, failures: 0 },
-    { url: 'http://compute-service-3:3003', healthy: true, failures: 0 }
+    { url: `http://${SERVICE_HOST}:3003`, healthy: true, failures: 0 }
   ]
 };
 

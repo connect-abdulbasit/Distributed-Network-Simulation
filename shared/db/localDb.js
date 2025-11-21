@@ -2,12 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
-const DB_DIR =
-  process.env.LOCAL_DB_DIR ||
-  path.join(__dirname, '../../data');
-const DB_FILE =
-  process.env.LOCAL_DB_PATH ||
-  path.join(DB_DIR, 'local-db.sqlite');
+// Use absolute path to ensure all services use the same database file
+const DB_DIR = process.env.LOCAL_DB_DIR
+  ? path.resolve(process.env.LOCAL_DB_DIR)
+  : path.resolve(__dirname, '../../data');
+const DB_FILE = process.env.LOCAL_DB_PATH
+  ? path.resolve(process.env.LOCAL_DB_PATH)
+  : path.resolve(DB_DIR, 'local-db.sqlite');
 
 const TABLE_DEFINITIONS = `
   CREATE TABLE IF NOT EXISTS users (
@@ -84,18 +85,31 @@ class LocalDB {
 
   async initialize() {
     await fs.promises.mkdir(DB_DIR, { recursive: true });
-    const SQL = await initSqlJs({ locateFile: locateWasm });
+    this.SQL = await initSqlJs({ locateFile: locateWasm });
+    await this.reload();
+  }
 
+  async reload() {
     const fileExists = fs.existsSync(DB_FILE);
     if (fileExists) {
-      const fileBuffer = await fs.promises.readFile(DB_FILE);
-      this.db = new SQL.Database(fileBuffer);
+      try {
+        const fileBuffer = await fs.promises.readFile(DB_FILE);
+        if (this.db) {
+          this.db.close();
+        }
+        this.db = new this.SQL.Database(fileBuffer);
+      } catch (error) {
+        console.error('[LocalDB] Error reloading database:', error);
+        // If reload fails, create a new database
+        this.db = new this.SQL.Database();
+      }
     } else {
-      this.db = new SQL.Database();
+      if (this.db) {
+        this.db.close();
+      }
+      this.db = new this.SQL.Database();
     }
-
     this.db.run(TABLE_DEFINITIONS);
-    await this.persist();
   }
 
   async persist() {
@@ -118,6 +132,8 @@ class LocalDB {
 
   async runQuery(sql, params = []) {
     await this.ready;
+    // Reload database from disk before read to get latest data from other processes
+    await this.reload();
     const stmt = this.db.prepare(sql);
     try {
       stmt.bind(params);
