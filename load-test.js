@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+require('dotenv').config();
 
 const axios = require('axios');
 
@@ -191,9 +191,11 @@ async function runLoadTest() {
   console.log('\n' + '='.repeat(70));
   console.log(`${colors.bright}${colors.cyan}STARTING LOAD TEST${colors.reset}`);
   console.log('='.repeat(70));
+  const expectedTotal = REQUESTS_PER_SECOND * DURATION_SECONDS;
   console.log(`\nTarget:        ${colors.magenta}${LOAD_BALANCER_URL}${ENDPOINT}${colors.reset}`);
   console.log(`Requests/sec:  ${colors.yellow}${REQUESTS_PER_SECOND}${colors.reset}`);
   console.log(`Duration:      ${colors.yellow}${DURATION_SECONDS} seconds${colors.reset}`);
+  console.log(`Expected Total: ${colors.cyan}~${expectedTotal} requests${colors.reset}`);
   console.log(`\n${colors.yellow}Press Ctrl+C to stop early${colors.reset}\n`);
 
   stats.startTime = Date.now();
@@ -201,27 +203,34 @@ async function runLoadTest() {
   const endTime = stats.startTime + (DURATION_SECONDS * 1000);
 
   const pendingRequests = new Set();
-  let requestId = 0;
+  let nextScheduledTime = stats.startTime;
 
-  // Schedule requests
+  // Schedule requests at fixed intervals
   const scheduleRequest = () => {
     const now = Date.now();
-    if (now >= endTime) {
+    
+    // Check if we should stop scheduling new requests
+    if (nextScheduledTime >= endTime) {
       return;
     }
 
+    // Make the request (fire and forget for scheduling purposes)
     const requestPromise = makeRequest().finally(() => {
       pendingRequests.delete(requestPromise);
     });
     pendingRequests.add(requestPromise);
-    requestId++;
 
-    // Schedule next request
-    const nextDelay = interval - (now - stats.startTime - (requestId - 1) * interval);
-    setTimeout(scheduleRequest, Math.max(0, nextDelay));
+    // Calculate when the next request should be scheduled
+    nextScheduledTime += interval;
+    const delay = Math.max(0, nextScheduledTime - Date.now());
+    
+    // Only schedule if we haven't passed the end time
+    if (nextScheduledTime < endTime) {
+      setTimeout(scheduleRequest, delay);
+    }
   };
 
-  // Start scheduling requests
+  // Start scheduling requests immediately
   scheduleRequest();
 
   // Progress updates
