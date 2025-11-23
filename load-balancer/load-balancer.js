@@ -107,6 +107,9 @@ const roundRobin = {
   compute: 0
 };
 
+// Request metrics tracking (per service URL)
+const requestMetrics = new Map(); // url -> { total, success, failed, recentRequests }
+
 const MAX_FAILURES = 3;
 const HEALTH_CHECK_INTERVAL = 10000; // 10 seconds
 const REQUEST_TIMEOUT = 10000; // 10 seconds (increased for bcrypt operations)
@@ -268,6 +271,9 @@ async function proxyRequest(req, res, serviceType) {
       const port = new URL(service.url).port;
       logger.request(req.method, req.path, service.url, response.status, responseTime, port);
 
+      // Track request metrics
+      trackRequest(service.url, response.status < 400);
+
       return res.status(response.status).json(response.data);
 
     } catch (error) {
@@ -281,6 +287,13 @@ async function proxyRequest(req, res, serviceType) {
 
       if (attempts >= maxAttempts) {
         logger.error(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed after ${maxAttempts} attempts (${responseTime}ms)`);
+        
+        // Track failed request (if we know which service failed)
+        if (error.config?.url) {
+          const failedUrl = new URL(error.config.url).origin;
+          trackRequest(failedUrl, false);
+        }
+        
         return res.status(503).json({
           error: 'Service unavailable',
           message: `Failed to reach ${serviceType} service after ${maxAttempts} attempts`,
@@ -332,11 +345,85 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Track request metrics
+function trackRequest(serviceUrl, isSuccess) {
+  if (!requestMetrics.has(serviceUrl)) {
+    requestMetrics.set(serviceUrl, {
+      total: 0,
+      success: 0,
+      failed: 0,
+      recentRequests: []
+    });
+  }
+  
+  const metrics = requestMetrics.get(serviceUrl);
+  metrics.total++;
+  
+  if (isSuccess) {
+    metrics.success++;
+  } else {
+    metrics.failed++;
+  }
+  
+  // Keep only last 60 seconds of requests for rate calculation
+  const now = Date.now();
+  metrics.recentRequests = metrics.recentRequests.filter(
+    time => now - time < 60000
+  );
+  metrics.recentRequests.push(now);
+}
+
+// Get request metrics
+function getRequestMetrics() {
+  const metrics = {};
+  for (const [serviceType, serviceList] of Object.entries(services)) {
+    serviceList.forEach(service => {
+      const serviceMetrics = requestMetrics.get(service.url);
+      if (serviceMetrics) {
+        metrics[service.url] = {
+          name: `${serviceType}-${service.url.split(':').pop()}`,
+          type: serviceType,
+          url: service.url,
+          total: serviceMetrics.total,
+          success: serviceMetrics.success,
+          failed: serviceMetrics.failed,
+          requestsPerSecond: (serviceMetrics.recentRequests.length / 60).toFixed(2),
+          successRate: serviceMetrics.total > 0 
+            ? ((serviceMetrics.success / serviceMetrics.total) * 100).toFixed(2) + '%'
+            : '0%'
+        };
+      } else {
+        // Initialize empty metrics
+        metrics[service.url] = {
+          name: `${serviceType}-${service.url.split(':').pop()}`,
+          type: serviceType,
+          url: service.url,
+          total: 0,
+          success: 0,
+          failed: 0,
+          requestsPerSecond: '0.00',
+          successRate: '0%'
+        };
+      }
+    });
+  }
+  return metrics;
+}
+
 // Service status endpoint
 app.get('/status', (req, res) => {
   res.json({
     services,
     roundRobin,
+    requestMetrics: getRequestMetrics(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Request metrics endpoint (for fault detector)
+app.get('/api/metrics', (req, res) => {
+  res.json({
+    metrics: getRequestMetrics(),
     timestamp: new Date().toISOString()
   });
 });

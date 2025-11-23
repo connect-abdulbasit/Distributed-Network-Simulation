@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fault Detector - Real-Time Monitoring Dashboard</title>
+    <title>Real-Time Request Monitoring Dashboard</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         * {
@@ -14,31 +14,27 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
             padding: 20px;
             min-height: 100vh;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
         .header {
-            background: white;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
             padding: 20px;
             border-radius: 10px;
             margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
         .header h1 {
-            color: #667eea;
             font-size: 28px;
+            color: #fff;
         }
 
         .connection-status {
@@ -68,22 +64,24 @@
             50% { opacity: 0.5; }
         }
 
+        /* Summary cards */
         .summary {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
 
         .summary-card {
-            background: white;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
         .summary-card h3 {
-            color: #666;
+            color: rgba(255, 255, 255, 0.7);
             font-size: 14px;
             margin-bottom: 10px;
             text-transform: uppercase;
@@ -92,7 +90,7 @@
         .summary-card .value {
             font-size: 36px;
             font-weight: bold;
-            color: #333;
+            color: #fff;
         }
 
         .summary-card.healthy .value {
@@ -107,184 +105,211 @@
             color: #667eea;
         }
 
-        .services-grid {
+        .summary-card.failed .value {
+            color: #f59e0b;
+        }
+
+        /* Service groups container */
+        .service-groups {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
             margin-bottom: 20px;
         }
 
-        .service-card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
+        .service-group {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            border-left: 4px solid #ccc;
         }
 
-        .service-card.healthy {
-            border-left-color: #10b981;
-        }
-
-        .service-card.unhealthy {
-            border-left-color: #ef4444;
-        }
-
-        .service-card.unknown {
-            border-left-color: #f59e0b;
-        }
-
-        .service-header {
+        .service-group-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
 
-        .service-name {
+        .service-group-name {
+            font-size: 24px;
             font-weight: bold;
-            font-size: 18px;
-            color: #333;
+            text-transform: uppercase;
+            color: #fff;
         }
 
-        .service-status {
-            padding: 5px 12px;
+        .service-group-status {
+            padding: 8px 16px;
+            margin-top: 10px;
             border-radius: 20px;
             font-size: 12px;
             font-weight: bold;
             text-transform: uppercase;
         }
 
-        .service-status.healthy {
-            background: #d1fae5;
-            color: #065f46;
+        .service-group-status.healthy {
+            background: rgba(16, 185, 129, 0.3);
+            color: #10b981;
+            border: 1px solid #10b981;
         }
 
-        .service-status.unhealthy {
-            background: #fee2e2;
-            color: #991b1b;
+        .service-group-status.unhealthy {
+            background: rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            border: 1px solid #ef4444;
         }
 
-        .service-status.unknown {
-            background: #fef3c7;
-            color: #92400e;
+        .service-group-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
         }
 
-        .service-details {
-            font-size: 14px;
-            color: #666;
+        .metric-item {
+            text-align: center;
         }
 
-        .service-details div {
-            margin: 5px 0;
-        }
-
-        .service-details strong {
-            color: #333;
-        }
-
-        .alerts-panel {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        .alerts-panel h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 20px;
-        }
-
-        .alert-item {
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 8px;
-            border-left: 4px solid;
-            animation: slideIn 0.3s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateX(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-
-        .alert-item.critical {
-            background: #fee2e2;
-            border-left-color: #ef4444;
-        }
-
-        .alert-item.warning {
-            background: #fef3c7;
-            border-left-color: #f59e0b;
-        }
-
-        .alert-item.info {
-            background: #dbeafe;
-            border-left-color: #3b82f6;
-        }
-
-        .alert-header {
-            display: flex;
-            justify-content: space-between;
+        .metric-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
             margin-bottom: 5px;
         }
 
-        .alert-type {
+        .metric-value {
+            font-size: 24px;
             font-weight: bold;
-            text-transform: uppercase;
-            font-size: 12px;
+            color: #fff;
         }
 
-        .alert-time {
-            font-size: 12px;
-            color: #666;
+        .metric-value.success {
+            color: #10b981;
         }
 
-        .alert-message {
+        .metric-value.failed {
+            color: #ef4444;
+        }
+
+        /* Graph container */
+        .graph-container {
+            position: relative;
+            height: 200px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 20px;
+        }
+
+        .graph-title {
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            z-index: 10;
+        }
+
+        .graph-canvas {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        .graph-line {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.3);
+            transition: height 0.3s ease;
+        }
+
+        .graph-line.has-requests {
+            background: linear-gradient(to top, #10b981, transparent);
+            animation: graphPulse 0.5s ease-out;
+        }
+
+        @keyframes graphPulse {
+            0% {
+                height: 2px;
+                opacity: 0.5;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                height: var(--graph-height, 50px);
+                opacity: 0.8;
+            }
+        }
+
+        /* Candle/Line graph visualization */
+        .request-graph {
+            position: relative;
+            width: 100%;
+            height: 150px;
+            margin-top: 10px;
+        }
+
+        .graph-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .graph-path {
+            fill: none;
+            stroke: #10b981;
+            stroke-width: 2;
+            transition: all 0.3s ease;
+        }
+
+        .graph-path.no-requests {
+            stroke: rgba(255, 255, 255, 0.3);
+        }
+
+        .graph-area {
+            fill: url(#gradient);
+            opacity: 0.3;
+        }
+
+        .graph-point {
+            fill: #10b981;
+            r: 3;
+            transition: all 0.3s ease;
+        }
+
+        .graph-point.active {
+            r: 5;
+            fill: #10b981;
+            filter: drop-shadow(0 0 4px #10b981);
+        }
+
+        .rps-indicator {
+            position: absolute;
+            top: 10px;
+            right: 15px;
             font-size: 14px;
-            color: #333;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #999;
+            color: rgba(255, 255, 255, 0.7);
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔍 Fault Detector - Real-Time Monitoring</h1>
-            <div class="connection-status">
-                <div class="status-indicator" id="statusIndicator"></div>
-                <span id="connectionText">Connecting...</span>
-            </div>
+    <div class="header">
+        <h1>Request Monitoring Dashboard</h1>
+        <div class="connection-status">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <span id="connectionText">Connecting...</span>
         </div>
+    </div>
 
-        <div class="summary" id="summary">
-            <!-- Summary cards will be inserted here -->
-        </div>
+    <div class="summary" id="summary">
+        <!-- Summary cards will be inserted here -->
+    </div>
 
-        <div class="services-grid" id="servicesGrid">
-            <!-- Service cards will be inserted here -->
-        </div>
-
-        <div class="alerts-panel">
-            <h2>📢 Real-Time Alerts</h2>
-            <div id="alertsContainer">
-                <div class="empty-state">No alerts yet. Waiting for events...</div>
-            </div>
-        </div>
+    <div class="service-groups" id="serviceGroups">
+        <!-- Service groups will be inserted here -->
     </div>
 
     <script>
@@ -296,11 +321,19 @@
         const statusIndicator = document.getElementById('statusIndicator');
         const connectionText = document.getElementById('connectionText');
         const summaryContainer = document.getElementById('summary');
-        const servicesGrid = document.getElementById('servicesGrid');
-        const alertsContainer = document.getElementById('alertsContainer');
+        const serviceGroupsContainer = document.getElementById('serviceGroups');
 
         let servicesData = {};
-        let alertCount = 0;
+        let requestMetricsData = {};
+        let graphData = {
+            auth: [],
+            data: [],
+            compute: []
+        };
+        const MAX_GRAPH_POINTS = 60; // Last 60 seconds
+        let lastRequestTotals = { auth: 0, data: 0, compute: 0 }; // Track last known totals
+        let requestRateHistory = { auth: [], data: [], compute: [] }; // Track requests per second
+        let lastGraphUpdate = { auth: 0, data: 0, compute: 0 }; // Track last graph update time
 
         // Connection status
         socket.on('connect', () => {
@@ -319,63 +352,108 @@
 
         // Initial health status
         socket.on('health-status', (data) => {
-            console.log('Received health status:', data);
             servicesData = data.services || {};
+            requestMetricsData = data.requestMetrics || {};
             updateSummary(data.summary);
-            updateServices(data.services);
+            updateServiceGroups(servicesData, requestMetricsData);
         });
 
         // Health summary updates
         socket.on('health-summary', (data) => {
-            console.log('Received health summary:', data);
-            if (data.summary) {
-                updateSummary(data.summary);
-            }
-            if (data.services) {
-                servicesData = data.services;
-                updateServices(data.services);
+            if (data.summary) updateSummary(data.summary);
+            if (data.services) servicesData = data.services;
+            if (data.requestMetrics) requestMetricsData = data.requestMetrics;
+            updateServiceGroups(servicesData, requestMetricsData);
+        });
+
+        // Request metrics (update immediately)
+        socket.on('request-metrics', (data) => {
+            if (data.metrics) {
+                requestMetricsData = data.metrics;
+                
+                // Check for new requests and update graphs immediately
+                const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
+                ['auth', 'data', 'compute'].forEach(serviceType => {
+                    if (aggregated[serviceType]) {
+                        const currentTotal = aggregated[serviceType].total;
+                        const lastTotal = lastRequestTotals[serviceType] || 0;
+                        
+                        if (currentTotal > lastTotal) {
+                            // New requests detected - update graph immediately
+                            updateGraph(serviceType, true);
+                        }
+                    }
+                });
+                
+                updateServiceGroups(servicesData, requestMetricsData);
             }
         });
 
-        // Service health updates
-        socket.on('service-health-update', (data) => {
-            console.log('Service health update:', data);
-            if (data.service) {
-                updateServiceCard(data.service);
+        // Individual request events (for graph animation)
+        socket.on('request-event', (data) => {
+            if (data.service && data.service.type) {
+                const serviceType = data.service.type;
+                if (serviceType !== 'loadbalancer' && graphData[serviceType]) {
+                    updateGraph(serviceType, data.status === 'success');
+                }
             }
         });
 
-        // Service recovery
-        socket.on('service-recovery', (data) => {
-            console.log('Service recovered:', data);
-            addAlert('info', 'SERVICE_RECOVERY', `${data.service.name} has recovered!`, data.timestamp);
-            if (data.service) {
-                updateServiceCard(data.service);
-            }
-        });
+        // Aggregate metrics by service type
+        function aggregateMetricsByType(services, metrics) {
+            const aggregated = {
+                auth: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 },
+                data: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 },
+                compute: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 }
+            };
 
-        // Service failure
-        socket.on('service-failure', (data) => {
-            console.log('Service failure:', data);
-            addAlert('critical', 'SERVICE_FAILURE', 
-                `${data.service.name} is down! (${data.service.consecutiveFailures} failures)`, 
-                data.timestamp);
-            if (data.service) {
-                updateServiceCard(data.service);
+            // Aggregate from services
+            for (const [serviceType, serviceList] of Object.entries(services)) {
+                if (serviceType === 'loadbalancer') continue;
+                
+                if (aggregated[serviceType]) {
+                    serviceList.forEach(service => {
+                        aggregated[serviceType].totalServices++;
+                        if (service.status === 'healthy') {
+                            aggregated[serviceType].healthy++;
+                        } else if (service.status === 'unhealthy') {
+                            aggregated[serviceType].unhealthy++;
+                        }
+                    });
+                }
             }
-        });
 
-        // Slow response
-        socket.on('slow-response', (data) => {
-            console.log('Slow response:', data);
-            addAlert('warning', 'SLOW_RESPONSE', 
-                `${data.service.name} is responding slowly (${data.service.responseTime}ms)`, 
-                data.timestamp);
-        });
+            // Aggregate from metrics
+            for (const [url, metric] of Object.entries(metrics)) {
+                // Determine service type from URL or metric
+                let serviceType = null;
+                if (metric.type) {
+                    serviceType = metric.type;
+                } else if (url.includes('3001') || url.includes('3002') || url.includes('3003')) {
+                    serviceType = 'auth';
+                } else if (url.includes('4002') || url.includes('4003') || url.includes('4004')) {
+                    serviceType = 'data';
+                } else if (url.includes('5002') || url.includes('5003') || url.includes('5004')) {
+                    serviceType = 'compute';
+                }
+
+                if (serviceType && aggregated[serviceType]) {
+                    aggregated[serviceType].total += metric.total || 0;
+                    aggregated[serviceType].success += metric.success || 0;
+                    aggregated[serviceType].failed += metric.failed || 0;
+                    aggregated[serviceType].rps += parseFloat(metric.requestsPerSecond || 0);
+                }
+            }
+
+            return aggregated;
+        }
 
         // Update summary cards
         function updateSummary(summary) {
             if (!summary) return;
+
+            const totalFailed = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.failed || 0), 0);
+            const totalRequests = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.total || 0), 0);
 
             summaryContainer.innerHTML = `
                 <div class="summary-card total">
@@ -390,89 +468,291 @@
                     <h3>Unhealthy</h3>
                     <div class="value">${summary.unhealthy || 0}</div>
                 </div>
-                <div class="summary-card">
-                    <h3>Unknown</h3>
-                    <div class="value">${summary.unknown || 0}</div>
+                <div class="summary-card total">
+                    <h3>Total Requests</h3>
+                    <div class="value">${totalRequests}</div>
+                </div>
+                <div class="summary-card failed">
+                    <h3>Failed Requests</h3>
+                    <div class="value">${totalFailed}</div>
+                </div>
+                <div class="summary-card healthy">
+                    <h3>Success Rate</h3>
+                    <div class="value">${calculateOverallSuccessRate()}%</div>
                 </div>
             `;
         }
 
-        // Update services grid
-        function updateServices(services) {
-            if (!services || Object.keys(services).length === 0) {
-                servicesGrid.innerHTML = '<div class="empty-state">No services found</div>';
+        function calculateOverallSuccessRate() {
+            const allMetrics = Object.values(requestMetricsData);
+            if (allMetrics.length === 0) return '0';
+            const total = allMetrics.reduce((sum, m) => sum + (m.total || 0), 0);
+            const success = allMetrics.reduce((sum, m) => sum + (m.success || 0), 0);
+            return total > 0 ? ((success / total) * 100).toFixed(1) : '0';
+        }
+
+        // Update service groups
+        function updateServiceGroups(services, metrics) {
+            const aggregated = aggregateMetricsByType(services, metrics);
+            
+            let html = '';
+            const serviceTypes = ['auth', 'data', 'compute'];
+            
+            serviceTypes.forEach(serviceType => {
+                const data = aggregated[serviceType];
+                if (data) {
+                    const isHealthy = data.unhealthy === 0 && data.totalServices > 0;
+                    const statusClass = isHealthy ? 'healthy' : 'unhealthy';
+                    const successRate = data.total > 0 
+                        ? ((data.success / data.total) * 100).toFixed(1) + '%'
+                        : '0%';
+                    
+                    html += `
+                        <div class="service-group">
+                            <div class="service-group-header">
+                                <div class="service-group-name">${serviceType} Service</div>
+                                <div class="service-group-status ${statusClass}">${statusClass.toUpperCase()}</div>
+                            </div>
+                            <div class="service-group-metrics">
+                                <div class="metric-item">
+                                    <div class="metric-label">Total Requests</div>
+                                    <div class="metric-value">${data.total}</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-label">Success</div>
+                                    <div class="metric-value success">${data.success}</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-label">Failed</div>
+                                    <div class="metric-value failed">${data.failed}</div>
+                                </div>
+                            </div>
+                            <div class="rps-indicator">${data.rps.toFixed(2)} req/s</div>
+                            <div class="request-graph" id="graph-${serviceType}">
+                                <svg class="graph-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
+                                    <defs>
+                                        <linearGradient id="gradient-${serviceType}" x1="0%" y1="0%" x2="0%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#10b981;stop-opacity:0.5" />
+                                            <stop offset="100%" style="stop-color:#10b981;stop-opacity:0" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path class="graph-path" id="path-${serviceType}" d="M0,150" />
+                                    <path class="graph-area" id="area-${serviceType}" d="M0,150 L0,150" fill="url(#gradient-${serviceType})" />
+                                </svg>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            serviceGroupsContainer.innerHTML = html;
+            
+            // Update graphs
+            serviceTypes.forEach(serviceType => {
+                updateGraphVisualization(serviceType, aggregated[serviceType]);
+            });
+        }
+
+        // Update graph data - continuously track request rate for smooth line
+        function updateGraph(serviceType, isSuccess) {
+            if (!graphData[serviceType]) return;
+            
+            const now = Date.now();
+            const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
+            const currentTotal = aggregated[serviceType] ? aggregated[serviceType].total : 0;
+            const lastTotal = lastRequestTotals[serviceType] || 0;
+            
+            // Initialize history if needed
+            if (!requestRateHistory[serviceType]) {
+                requestRateHistory[serviceType] = [];
+            }
+            
+            // If total increased, add to history
+            if (currentTotal > lastTotal) {
+                const increase = currentTotal - lastTotal;
+                requestRateHistory[serviceType].push({
+                    time: now,
+                    count: increase
+                });
+                lastRequestTotals[serviceType] = currentTotal;
+            }
+            
+            // Remove requests older than 1 second
+            requestRateHistory[serviceType] = requestRateHistory[serviceType].filter(
+                r => now - r.time < 1000
+            );
+            
+            // Calculate current requests per second
+            const requestsInLastSecond = requestRateHistory[serviceType].reduce(
+                (sum, r) => sum + r.count, 0
+            );
+            
+            // Add data point every second for smooth continuous line
+            const timeSinceLastUpdate = now - (lastGraphUpdate[serviceType] || 0);
+            
+            // Add point every 1 second for smooth continuous line
+            if (timeSinceLastUpdate >= 1000) {
+                graphData[serviceType].push({
+                    time: now,
+                    value: requestsInLastSecond, // Current requests per second
+                    isRequest: requestsInLastSecond > 0
+                });
+                
+                lastGraphUpdate[serviceType] = now;
+                
+                // Keep only last 60 points
+                if (graphData[serviceType].length > MAX_GRAPH_POINTS) {
+                    graphData[serviceType].shift();
+                }
+            } else {
+                // Update last point with current value for immediate feedback
+                const lastPoint = graphData[serviceType][graphData[serviceType].length - 1];
+                if (lastPoint) {
+                    lastPoint.value = requestsInLastSecond;
+                    lastPoint.isRequest = requestsInLastSecond > 0;
+                }
+            }
+            
+            // Always update visualization for smooth rendering
+            updateGraphVisualization(serviceType, aggregated[serviceType]);
+        }
+
+        // Update graph visualization
+        function updateGraphVisualization(serviceType, data) {
+            const graphContainer = document.getElementById(`graph-${serviceType}`);
+            if (!graphContainer) return;
+            
+            const path = document.getElementById(`path-${serviceType}`);
+            const area = document.getElementById(`area-${serviceType}`);
+            if (!path || !area) return;
+            
+            const points = graphData[serviceType];
+            const width = 400;
+            const height = 150;
+            const timeRange = 60000; // 60 seconds
+            const now = Date.now();
+            
+            if (points.length === 0) {
+                // No data - straight line at bottom
+                path.setAttribute('d', `M0,${height - 10} L${width},${height - 10}`);
+                path.classList.add('no-requests');
+                area.setAttribute('d', `M0,${height} L${width},${height} L${width},${height - 10} L0,${height - 10} Z`);
                 return;
             }
-
-            let html = '';
-            for (const [serviceType, serviceList] of Object.entries(services)) {
-                serviceList.forEach(service => {
-                    html += createServiceCard(service);
-                });
-            }
-            servicesGrid.innerHTML = html;
-        }
-
-        // Create service card
-        function createServiceCard(service) {
-            const statusClass = service.status || 'unknown';
-            const statusText = (service.status || 'unknown').toUpperCase();
             
-            return `
-                <div class="service-card ${statusClass}" data-service-url="${service.url}">
-                    <div class="service-header">
-                        <div class="service-name">${service.name}</div>
-                        <div class="service-status ${statusClass}">${statusText}</div>
-                    </div>
-                    <div class="service-details">
-                        <div><strong>Type:</strong> ${service.type || 'N/A'}</div>
-                        <div><strong>URL:</strong> ${service.url || 'N/A'}</div>
-                        <div><strong>Response Time:</strong> ${service.responseTime ? service.responseTime + 'ms' : 'N/A'}</div>
-                        <div><strong>Uptime:</strong> ${service.uptime || 'N/A'}</div>
-                        <div><strong>Last Check:</strong> ${service.lastCheck ? new Date(service.lastCheck).toLocaleTimeString() : 'N/A'}</div>
-                        ${service.consecutiveFailures > 0 ? `<div><strong>Failures:</strong> ${service.consecutiveFailures}</div>` : ''}
-                    </div>
-                </div>
-            `;
-        }
-
-        // Update individual service card
-        function updateServiceCard(service) {
-            const card = document.querySelector(`[data-service-url="${service.url}"]`);
-            if (card) {
-                card.outerHTML = createServiceCard(service);
+            // Calculate max value for scaling - use fixed reasonable scale
+            const requestPoints = points.filter(p => p.isRequest && p.value > 0);
+            
+            // Use a fixed scale based on typical request rates
+            // This ensures spikes are proportional and not too large
+            let maxValue = 10; // Default max (10 requests/second = full height)
+            
+            if (requestPoints.length > 0) {
+                const values = requestPoints.map(p => p.value);
+                const max = Math.max(...values);
+                
+                // Use adaptive scale: if max is > 10, scale to show it, but cap visualization
+                // This way 5 req/s shows as 50% height, 10 req/s shows as 100% height
+                if (max > 10) {
+                    maxValue = Math.min(max, 20); // Cap at 20 req/s for visualization
+                } else {
+                    maxValue = 10; // Standard scale for normal traffic
+                }
+            }
+            
+            // Build path - show line going up when requests come, straight when no requests
+            let pathD = '';
+            let areaD = '';
+            
+            if (points.length === 0) {
+                // No data - straight line at bottom
+                pathD = `M 0,${height - 10} L ${width},${height - 10}`;
+                areaD = `M 0,${height} L ${width},${height} L ${width},${height - 10} L 0,${height - 10} Z`;
             } else {
-                // If card doesn't exist, refresh all services
-                updateServices(servicesData);
+                // Calculate x positions based on time (last 60 seconds)
+                const timeRange = 60000;
+                const now = Date.now();
+                
+                // Sort points by time
+                const sortedPoints = [...points].sort((a, b) => a.time - b.time);
+                
+                // Create smooth line by connecting all points in order
+                sortedPoints.forEach((point, index) => {
+                    const timeOffset = now - point.time;
+                    // Calculate x position: older points on left, newer on right
+                    const x = Math.max(0, Math.min(width, width - (timeOffset / timeRange) * width));
+                    
+                    // Calculate y position based on request rate (value = requests per second)
+                    let normalizedValue = 0;
+                    if (point.value > 0 && maxValue > 0) {
+                        // Linear scaling: value / maxValue gives 0-1 range
+                        normalizedValue = Math.min(1, point.value / maxValue);
+                    }
+                    
+                    // Y position: bottom is height-10, top is 15 (leaving margins)
+                    // Higher request rate = higher on graph
+                    const y = height - 10 - (normalizedValue * (height - 25)); // 25px margin from top
+                    
+                    if (index === 0) {
+                        // Start path
+                        pathD = `M ${x},${y}`;
+                        areaD = `M ${x},${height - 10}`;
+                    } else {
+                        // Continue line
+                        pathD += ` L ${x},${y}`;
+                    }
+                    
+                    // Track for area path
+                    if (index === sortedPoints.length - 1) {
+                        // Last point - complete area path
+                        areaD += ` L ${x},${y} L ${x},${height - 10}`;
+                    }
+                });
+                
+                // Complete the path to right edge (current time = now)
+                if (sortedPoints.length > 0) {
+                    const lastPoint = sortedPoints[sortedPoints.length - 1];
+                    const lastX = width; // Right edge = current time
+                    let lastY = height - 10; // Default to bottom (no requests)
+                    
+                    // Use the last point's value (current request rate) for smooth continuation
+                    if (lastPoint.value > 0 && maxValue > 0) {
+                        const normalizedValue = Math.min(1, lastPoint.value / maxValue);
+                        lastY = height - 10 - (normalizedValue * (height - 25));
+                    }
+                    
+                    // Extend line to right edge (current time)
+                    pathD += ` L ${lastX},${lastY}`;
+                    // Complete area path: close the shape
+                    areaD += ` L ${lastX},${lastY} L ${lastX},${height - 10} Z`;
+                } else {
+                    // No points, straight line at bottom
+                    pathD = `M 0,${height - 10} L ${width},${height - 10}`;
+                    areaD = `M 0,${height} L ${width},${height} L ${width},${height - 10} L 0,${height - 10} Z`;
+                }
+                
+                // Update path class based on whether there are requests
+                if (requestPoints.length === 0) {
+                    path.classList.add('no-requests');
+                } else {
+                    path.classList.remove('no-requests');
+                }
             }
-        }
-
-        // Add alert
-        function addAlert(severity, type, message, timestamp) {
-            if (alertsContainer.querySelector('.empty-state')) {
-                alertsContainer.innerHTML = '';
-            }
-
-            const alertItem = document.createElement('div');
-            alertItem.className = `alert-item ${severity}`;
-            alertItem.innerHTML = `
-                <div class="alert-header">
-                    <span class="alert-type">${type}</span>
-                    <span class="alert-time">${new Date(timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div class="alert-message">${message}</div>
-            `;
-
-            alertsContainer.insertBefore(alertItem, alertsContainer.firstChild);
             
-            // Keep only last 50 alerts
-            const alerts = alertsContainer.querySelectorAll('.alert-item');
-            if (alerts.length > 50) {
-                alerts[alerts.length - 1].remove();
-            }
-
-            alertCount++;
+            path.setAttribute('d', pathD);
+            area.setAttribute('d', areaD);
         }
+
+        // Periodically update graphs (continuous smooth updates)
+        setInterval(() => {
+            const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
+            ['auth', 'data', 'compute'].forEach(serviceType => {
+                if (aggregated[serviceType]) {
+                    // Always update graph to show current state (smooth continuous line)
+                    updateGraph(serviceType, true);
+                }
+            });
+        }, 500); // Update every 500ms for smooth continuous updates
 
         // Request status on page load
         socket.on('connect', () => {
@@ -481,4 +761,3 @@
     </script>
 </body>
 </html>
-
