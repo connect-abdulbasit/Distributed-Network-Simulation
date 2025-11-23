@@ -110,7 +110,7 @@ const roundRobin = {
 // Request metrics tracking (per service URL)
 const requestMetrics = new Map(); // url -> { total, success, failed, recentRequests }
 
-const MAX_FAILURES = 3;
+const MAX_FAILURES = 5; // Increased from 3 to 5 to be more tolerant of busy compute services
 const HEALTH_CHECK_INTERVAL = 10000; // 10 seconds
 const REQUEST_TIMEOUT = 10000; // 10 seconds (increased for bcrypt operations)
 
@@ -154,8 +154,10 @@ async function healthCheck() {
     for (const service of serviceList) {
       try {
         const startTime = Date.now();
+        // Compute services may be busy with long-running tasks, so give them more time
+        const timeout = serviceType === 'compute' ? 10000 : 3000;
         const response = await axios.get(`${service.url}/health`, {
-          timeout: 3000
+          timeout: timeout
         });
         const responseTime = Date.now() - startTime;
 
@@ -175,15 +177,21 @@ async function healthCheck() {
           healthyCount++;
         }
       } catch (error) {
+        // For compute services, be more lenient - they may be busy with long-running tasks
+        const failureThreshold = serviceType === 'compute' ? MAX_FAILURES * 2 : MAX_FAILURES;
+        
         service.failures++;
-        if (service.failures >= MAX_FAILURES) {
+        if (service.failures >= failureThreshold) {
           service.healthy = false;
           unhealthyCount++;
         }
-        // Log failures for all services
+        // Log failures for all services (but less frequently for compute to reduce noise)
         if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
-          const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
-          logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message}`);
+          // Only log compute failures if they're getting close to threshold
+          if (serviceType !== 'compute' || service.failures >= failureThreshold - 2) {
+            const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
+            logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message} (${service.failures}/${failureThreshold})`);
+          }
         }
       }
     }

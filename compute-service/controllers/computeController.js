@@ -4,6 +4,11 @@ const { createQueue } = require('../queue/bullQueue');
 // Initialize queue
 const jobQueue = createQueue('compute-jobs');
 
+// Helper function to add artificial delay
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Direct computation (synchronous)
 exports.computeDirect = async (req, res) => {
   try {
@@ -69,6 +74,7 @@ exports.computeDirect = async (req, res) => {
           supported: ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average', 'matrixMultiply']
         });
     }
+
 
     res.json({
       operation,

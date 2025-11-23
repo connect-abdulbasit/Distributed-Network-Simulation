@@ -6,7 +6,7 @@ const LOAD_BALANCER_URL = process.env.LB_URL || 'http://localhost:3000';
 const REQUESTS_PER_SECOND = parseInt(process.env.RPS || '10');
 const DURATION_SECONDS = parseInt(process.env.DURATION || '30');
 const ENDPOINT = process.env.ENDPOINT || '/health';
-const SERVICE_TYPE = process.env.SERVICE_TYPE || 'all'; // 'auth', 'data', 'compute', 'both', 'all'
+const SERVICE_TYPE = process.env.SERVICE_TYPE || 'compute'; // 'auth', 'data', 'compute', 'both', 'all'
 
 const colors = {
   reset: '\x1b[0m',
@@ -46,7 +46,7 @@ function getServiceEndpoint() {
   } else if (SERVICE_TYPE === 'auth') {
     return '/api/auth/health';
   } else if (SERVICE_TYPE === 'compute') {
-    return '/api/compute/health';
+    return '/api/compute/direct';
   } else if (SERVICE_TYPE === 'both') {
     // Alternate between auth and data
     return (stats.total % 2 === 0) ? '/api/auth/health' : '/api/data/health';
@@ -155,34 +155,107 @@ async function makeRequest() {
           validateStatus: () => true
         });
       } else if (pathname.includes('/api/compute/direct')) {
-        const operations = ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average'];
+        // Mix of small and large tasks (30% large, 70% small)
+        const isLargeTask = Math.random() < 0.3;
+        const operations = ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average', 'matrixMultiply'];
         const randomOp = operations[Math.floor(Math.random() * operations.length)];
         let operands;
         
-        if (randomOp === 'factorial' || randomOp === 'fibonacci' || randomOp === 'primeCheck') {
-          operands = [Math.floor(Math.random() * 20) + 1];
+        if (randomOp === 'factorial') {
+          operands = [isLargeTask 
+            ? Math.floor(Math.random() * 71) + 100  
+            : Math.floor(Math.random() * 20) + 1];  
+        } else if (randomOp === 'fibonacci') {
+          operands = [isLargeTask
+            ? Math.floor(Math.random() * 11) + 40   
+            : Math.floor(Math.random() * 20) + 1];   
+        } else if (randomOp === 'primeCheck') {
+          operands = [isLargeTask
+            ? Math.floor(Math.random() * 9000000) + 1000000  
+            : Math.floor(Math.random() * 1000) + 1];          
         } else if (randomOp === 'power') {
-          operands = [Math.floor(Math.random() * 10) + 1, Math.floor(Math.random() * 5) + 1];
-        } else if (randomOp === 'average' || randomOp === 'sumOfSquares') {
-          operands = Array.from({ length: 5 }, () => Math.floor(Math.random() * 100));
+          if (isLargeTask) {
+            operands = [
+              Math.floor(Math.random() * 11) + 10,  
+              Math.floor(Math.random() * 5) + 8      
+            ];
+          } else {
+            operands = [
+              Math.floor(Math.random() * 9) + 2,    
+              Math.floor(Math.random() * 4) + 2     
+            ];
+          }
+        } else if (randomOp === 'matrixMultiply') {
+          const size = isLargeTask ? 50 : 5;
+          const matrixA = Array.from({ length: size }, () => 
+            Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+          );
+          const matrixB = Array.from({ length: size }, () => 
+            Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+          );
+          operands = [matrixA, matrixB];
+        } else if (randomOp === 'sumOfSquares' || randomOp === 'average') {
+          const count = isLargeTask ? 10000 : Math.floor(Math.random() * 6) + 5;
+          operands = Array.from({ length: count }, () => Math.floor(Math.random() * 1000));
         } else {
-          operands = Array.from({ length: 5 }, () => Math.floor(Math.random() * 100));
+          const count = isLargeTask ? 1000 : Math.floor(Math.random() * 6) + 5;
+          operands = Array.from({ length: count }, () => Math.floor(Math.random() * 1000));
         }
+        
+        const timeout = isLargeTask ? 30000 : 10000; 
         
         response = await axios.post(url, {
           operation: randomOp,
           operands: operands
         }, {
-          timeout: 10000,
+          timeout: timeout,
           validateStatus: () => true
         });
       } else if (pathname.includes('/api/compute/job')) {
-        response = await axios.post(url, {
-          type: 'computation',
-          data: {
+        // Mix of small and large jobs (30% large)
+        const isLargeJob = Math.random() < 0.3;
+        let jobData;
+        
+        if (isLargeJob) {
+          // Large job: factorial of 150, fibonacci of 45, or large matrix multiplication
+          const largeOps = ['factorial', 'fibonacci', 'matrixMultiply'];
+          const op = largeOps[Math.floor(Math.random() * largeOps.length)];
+          
+          if (op === 'factorial') {
+            jobData = {
+              operation: 'factorial',
+              operands: [150] // Large factorial
+            };
+          } else if (op === 'fibonacci') {
+            jobData = {
+              operation: 'fibonacci',
+              operands: [45] // Large fibonacci
+            };
+          } else {
+            // Large matrix multiplication
+            const size = 40;
+            const matrixA = Array.from({ length: size }, () => 
+              Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+            );
+            const matrixB = Array.from({ length: size }, () => 
+              Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+            );
+            jobData = {
+              operation: 'matrixMultiply',
+              operands: [matrixA, matrixB]
+            };
+          }
+        } else {
+          // Small job
+          jobData = {
             operation: 'add',
             operands: [1, 2, 3, 4, 5]
-          }
+          };
+        }
+        
+        response = await axios.post(url, {
+          type: 'computation',
+          data: jobData
         }, {
           timeout: 5000,
           validateStatus: () => true
