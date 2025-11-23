@@ -1,0 +1,18 @@
+{
+  "name": "compute-service",
+  "version": "1.0.0",
+  "description": "Compute service for distributed system",
+  "main": "compute-server.js",
+  "scripts": {
+    "start": "node compute-server.js",
+    "dev": "nodemon compute-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "bull": "^4.11.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+

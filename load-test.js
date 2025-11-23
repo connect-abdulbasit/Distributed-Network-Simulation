@@ -6,7 +6,7 @@ const LOAD_BALANCER_URL = process.env.LB_URL || 'http://localhost:3000';
 const REQUESTS_PER_SECOND = parseInt(process.env.RPS || '10');
 const DURATION_SECONDS = parseInt(process.env.DURATION || '30');
 const ENDPOINT = process.env.ENDPOINT || '/health';
-const SERVICE_TYPE = process.env.SERVICE_TYPE || 'both';
+const SERVICE_TYPE = process.env.SERVICE_TYPE || 'all'; // 'auth', 'data', 'compute', 'both', 'all'
 
 const colors = {
   reset: '\x1b[0m',
@@ -45,8 +45,17 @@ function getServiceEndpoint() {
     return '/api/data/health';
   } else if (SERVICE_TYPE === 'auth') {
     return '/api/auth/health';
+  } else if (SERVICE_TYPE === 'compute') {
+    return '/api/compute/health';
   } else if (SERVICE_TYPE === 'both') {
+    // Alternate between auth and data
     return (stats.total % 2 === 0) ? '/api/auth/health' : '/api/data/health';
+  } else if (SERVICE_TYPE === 'all') {
+    // Alternate between all three services
+    const mod = stats.total % 3;
+    if (mod === 0) return '/api/auth/health';
+    if (mod === 1) return '/api/data/health';
+    return '/api/compute/health';
   }
   return '/health';
 }
@@ -131,6 +140,60 @@ async function makeRequest() {
             testId: randomId
           }
         }, {
+          timeout: 5000,
+          validateStatus: () => true
+        });
+      }
+    }
+    else if (actualEndpoint.includes('/api/compute')) {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      
+      if (pathname === '/api/compute/health' || pathname.endsWith('/api/compute/health')) {
+        response = await axios.get(url, {
+          timeout: 5000,
+          validateStatus: () => true
+        });
+      } else if (pathname.includes('/api/compute/direct')) {
+        const operations = ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average'];
+        const randomOp = operations[Math.floor(Math.random() * operations.length)];
+        let operands;
+        
+        if (randomOp === 'factorial' || randomOp === 'fibonacci' || randomOp === 'primeCheck') {
+          operands = [Math.floor(Math.random() * 20) + 1];
+        } else if (randomOp === 'power') {
+          operands = [Math.floor(Math.random() * 10) + 1, Math.floor(Math.random() * 5) + 1];
+        } else if (randomOp === 'average' || randomOp === 'sumOfSquares') {
+          operands = Array.from({ length: 5 }, () => Math.floor(Math.random() * 100));
+        } else {
+          operands = Array.from({ length: 5 }, () => Math.floor(Math.random() * 100));
+        }
+        
+        response = await axios.post(url, {
+          operation: randomOp,
+          operands: operands
+        }, {
+          timeout: 10000,
+          validateStatus: () => true
+        });
+      } else if (pathname.includes('/api/compute/job')) {
+        response = await axios.post(url, {
+          type: 'computation',
+          data: {
+            operation: 'add',
+            operands: [1, 2, 3, 4, 5]
+          }
+        }, {
+          timeout: 5000,
+          validateStatus: () => true
+        });
+      } else if (pathname.includes('/api/compute/stats')) {
+        response = await axios.get(url, {
+          timeout: 5000,
+          validateStatus: () => true
+        });
+      } else {
+        response = await axios.get(url, {
           timeout: 5000,
           validateStatus: () => true
         });

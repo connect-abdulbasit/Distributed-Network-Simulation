@@ -80,7 +80,7 @@ const DATA_PORTS = process.env.DATA_PORTS ?
 
 const COMPUTE_PORTS = process.env.COMPUTE_PORTS ? 
   process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) : 
-  [4003]; // Use 4003 instead of 3003 to avoid conflict with auth-service-3
+  [5002, 5003, 5004]; // Multiple compute service instances for load balancing
 
 const services = {
   auth: AUTH_PORTS.map(port => ({
@@ -161,8 +161,8 @@ async function healthCheck() {
           service.healthy = true;
           service.failures = 0;
           
-          // Log recovery for auth and data services
-          if (serviceType === 'auth' || serviceType === 'data') {
+          // Log recovery for all services
+          if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
             const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
             if (wasUnhealthy) {
               logger.success(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} ${colors.green}RECOVERED${colors.reset} (${responseTime}ms)`);
@@ -177,8 +177,8 @@ async function healthCheck() {
           service.healthy = false;
           unhealthyCount++;
         }
-        // Log failures for auth and data services
-        if (serviceType === 'auth' || serviceType === 'data') {
+        // Log failures for all services
+        if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
           const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
           logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message}`);
         }
@@ -186,7 +186,7 @@ async function healthCheck() {
     }
   }
   
-  // Show summary for auth and data services if any are unhealthy
+  // Show summary for all services if any are unhealthy
   const authServices = services.auth || [];
   const authHealthy = authServices.filter(s => s.healthy).length;
   const authTotal = authServices.length;
@@ -201,6 +201,14 @@ async function healthCheck() {
   
   if (dataHealthy < dataTotal) {
     logger.warning(`DATA services: ${colors.green}${dataHealthy}${colors.reset}/${colors.yellow}${dataTotal}${colors.reset} healthy`);
+  }
+  
+  const computeServices = services.compute || [];
+  const computeHealthy = computeServices.filter(s => s.healthy).length;
+  const computeTotal = computeServices.length;
+  
+  if (computeHealthy < computeTotal) {
+    logger.warning(`COMPUTE services: ${colors.green}${computeHealthy}${colors.reset}/${colors.yellow}${computeTotal}${colors.reset} healthy`);
   }
 }
 
