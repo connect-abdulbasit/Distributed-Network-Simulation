@@ -76,7 +76,7 @@ const AUTH_PORTS = process.env.AUTH_PORTS ?
 // Data and compute services use different ports to avoid conflicts with auth services
 const DATA_PORTS = process.env.DATA_PORTS ? 
   process.env.DATA_PORTS.split(',').map(p => parseInt(p.trim())) : 
-  [4002]; // Use 4002 instead of 3002 to avoid conflict with auth-service-2
+  [4002, 4003, 4004]; // Multiple data service instances for load balancing
 
 const COMPUTE_PORTS = process.env.COMPUTE_PORTS ? 
   process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) : 
@@ -109,7 +109,7 @@ const roundRobin = {
 
 const MAX_FAILURES = 3;
 const HEALTH_CHECK_INTERVAL = 10000; // 10 seconds
-const REQUEST_TIMEOUT = 5000; // 5 seconds
+const REQUEST_TIMEOUT = 10000; // 10 seconds (increased for bcrypt operations)
 
 // Get next healthy service using round-robin
 function getNextHealthyService(serviceType) {
@@ -161,13 +161,13 @@ async function healthCheck() {
           service.healthy = true;
           service.failures = 0;
           
-          // Only log auth services
-          if (serviceType === 'auth') {
+          // Log recovery for auth and data services
+          if (serviceType === 'auth' || serviceType === 'data') {
             const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
             if (wasUnhealthy) {
               logger.success(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} ${colors.green}RECOVERED${colors.reset} (${responseTime}ms)`);
             }
-            // Don't log healthy status for auth services to reduce noise
+            // Don't log healthy status to reduce noise
           }
           healthyCount++;
         }
@@ -177,8 +177,8 @@ async function healthCheck() {
           service.healthy = false;
           unhealthyCount++;
         }
-        // Only log failures for auth services
-        if (serviceType === 'auth') {
+        // Log failures for auth and data services
+        if (serviceType === 'auth' || serviceType === 'data') {
           const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
           logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message}`);
         }
@@ -186,13 +186,21 @@ async function healthCheck() {
     }
   }
   
-  // Only show summary for auth services
+  // Show summary for auth and data services if any are unhealthy
   const authServices = services.auth || [];
   const authHealthy = authServices.filter(s => s.healthy).length;
   const authTotal = authServices.length;
   
   if (authHealthy < authTotal) {
     logger.warning(`AUTH services: ${colors.green}${authHealthy}${colors.reset}/${colors.yellow}${authTotal}${colors.reset} healthy`);
+  }
+  
+  const dataServices = services.data || [];
+  const dataHealthy = dataServices.filter(s => s.healthy).length;
+  const dataTotal = dataServices.length;
+  
+  if (dataHealthy < dataTotal) {
+    logger.warning(`DATA services: ${colors.green}${dataHealthy}${colors.reset}/${colors.yellow}${dataTotal}${colors.reset} healthy`);
   }
 }
 
@@ -212,18 +220,34 @@ async function proxyRequest(req, res, serviceType) {
       const targetUrl = `${service.url}${req.path}`;
       const attemptStartTime = Date.now();
 
-      const response = await axios({
+      // Prepare headers - remove host and connection headers that shouldn't be forwarded
+      const headers = { ...req.headers };
+      delete headers.host;
+      delete headers.connection;
+      
+      // Ensure Content-Type is set for POST/PUT requests with body
+      if ((req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && req.body) {
+        if (!headers['content-type']) {
+          headers['content-type'] = 'application/json';
+        }
+      }
+
+      const axiosConfig = {
         method: req.method,
         url: targetUrl,
-        data: req.body,
-        headers: {
-          ...req.headers,
-          host: new URL(service.url).host
-        },
+        headers: headers,
         timeout: REQUEST_TIMEOUT,
-        validateStatus: () => true // Accept any status code
-      });
+        validateStatus: () => true,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      };
 
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+        axiosConfig.data = req.body;
+        delete headers['content-length'];
+      }
+
+      const response = await axios(axiosConfig);
       const responseTime = Date.now() - attemptStartTime;
       const totalTime = Date.now() - requestStartTime;
 
@@ -269,35 +293,35 @@ app.all('/api/auth/*', (req, res) => proxyRequest(req, res, 'auth'));
 app.all('/api/data/*', (req, res) => proxyRequest(req, res, 'data'));
 app.all('/api/compute/*', (req, res) => proxyRequest(req, res, 'compute'));
 
-// Load balancer health endpoint - proxy to auth services for load testing
+// Load balancer health endpoint - returns load balancer's own health status
 app.get('/health', (req, res) => {
-  // If query param ?lb=true, return load balancer health status
-  if (req.query.lb === 'true') {
-    const healthStatus = {};
-    
-    for (const [serviceType, serviceList] of Object.entries(services)) {
-      healthStatus[serviceType] = {
-        total: serviceList.length,
-        healthy: serviceList.filter(s => s.healthy).length,
-        unhealthy: serviceList.filter(s => !s.healthy).length,
-        services: serviceList.map(s => ({
-          url: s.url,
-          healthy: s.healthy,
-          failures: s.failures
-        }))
-      };
-    }
-
-    return res.json({
-      status: 'healthy',
-      loadBalancer: 'operational',
-      timestamp: new Date().toISOString(),
-      services: healthStatus
-    });
-  }
+  const healthStatus = {};
   
-  // Otherwise proxy to auth service (for load testing distribution)
-  proxyRequest(req, res, 'auth');
+  for (const [serviceType, serviceList] of Object.entries(services)) {
+    healthStatus[serviceType] = {
+      total: serviceList.length,
+      healthy: serviceList.filter(s => s.healthy).length,
+      unhealthy: serviceList.filter(s => !s.healthy).length,
+      services: serviceList.map(s => ({
+        url: s.url,
+        healthy: s.healthy,
+        failures: s.failures
+      }))
+    };
+  }
+
+  // Determine overall load balancer health
+  const allServicesHealthy = Object.values(healthStatus).every(
+    status => status.unhealthy === 0
+  );
+
+  res.json({
+    status: allServicesHealthy ? 'healthy' : 'degraded',
+    loadBalancer: 'operational',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    services: healthStatus
+  });
 });
 
 // Service status endpoint

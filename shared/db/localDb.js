@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
-// Use absolute path to ensure all services use the same database file
 const DB_DIR = process.env.LOCAL_DB_DIR
   ? path.resolve(process.env.LOCAL_DB_DIR)
   : path.resolve(__dirname, '../../data');
@@ -99,8 +98,7 @@ class LocalDB {
         }
         this.db = new this.SQL.Database(fileBuffer);
       } catch (error) {
-        console.error('[LocalDB] Error reloading database:', error);
-        // If reload fails, create a new database
+        console.error('[LocalDB] Error reloading database:', error);  
         this.db = new this.SQL.Database();
       }
     } else {
@@ -113,27 +111,38 @@ class LocalDB {
   }
 
   async persist() {
-    const data = this.db.export();
-    await fs.promises.writeFile(DB_FILE, Buffer.from(data));
+    try {
+      const data = this.db.export();
+      await fs.promises.writeFile(DB_FILE, Buffer.from(data));
+    } catch (error) {
+      console.error('[LocalDB] Error persisting database:', error);
+      throw error;
+    }
   }
 
   async withWrite(fn) {
     await this.ready;
+    if (!this.db) {
+      await this.reload();
+    }
     this.writeQueue = this.writeQueue.then(async () => {
+      await this.reload();
       const result = await fn(this.db);
       await this.persist();
       return result;
     }).catch(error => {
       console.error('[LocalDB] Write operation failed:', error);
+      throw error;
     });
 
     return this.writeQueue;
   }
 
-  async runQuery(sql, params = []) {
+  async runQuery(sql, params = [], forceReload = false) {
     await this.ready;
-    // Reload database from disk before read to get latest data from other processes
-    await this.reload();
+    if (!this.db || forceReload) {
+      await this.reload();
+    }
     const stmt = this.db.prepare(sql);
     try {
       stmt.bind(params);
@@ -209,19 +218,14 @@ class LocalDB {
     return item;
   }
 
-  // Atomic insert that fails if key already exists (for create operations)
-  // This performs the check and insert atomically within the same write transaction
   async insertDataItem(item) {
     let inserted = false;
     await this.withWrite(async (db) => {
-      // Use a prepared statement to check if key exists atomically
       const checkStmt = db.prepare('SELECT data_key FROM data_items WHERE data_key = ?');
       checkStmt.bind([item.key]);
       
       try {
-        // Check if key exists
         if (checkStmt.step()) {
-          // Key already exists
           checkStmt.free();
           const error = new Error('Key already exists');
           error.code = 'SQLITE_CONSTRAINT_UNIQUE';
@@ -229,7 +233,6 @@ class LocalDB {
         }
         checkStmt.free();
 
-        // Key doesn't exist, insert it
         const insertStmt = db.prepare(
           `INSERT INTO data_items (id, data_key, value_json, metadata_json, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`
@@ -247,7 +250,6 @@ class LocalDB {
           insertStmt.step();
           inserted = true;
         } catch (insertError) {
-          // If insert fails due to unique constraint (race condition caught by DB)
           if (insertError.message && insertError.message.includes('UNIQUE')) {
             const uniqueError = new Error('Key already exists');
             uniqueError.code = 'SQLITE_CONSTRAINT_UNIQUE';
@@ -258,11 +260,9 @@ class LocalDB {
           insertStmt.free();
         }
       } catch (error) {
-        // Re-throw our custom error
         if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
           throw error;
         }
-        // For other errors, check if it's a unique constraint violation
         if (error.message && error.message.includes('UNIQUE')) {
           const uniqueError = new Error('Key already exists');
           uniqueError.code = 'SQLITE_CONSTRAINT_UNIQUE';

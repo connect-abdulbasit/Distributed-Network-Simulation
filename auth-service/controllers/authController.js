@@ -7,33 +7,22 @@ const localDb = require(path.join(__dirname, '../../shared/db/localDb'));
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
-
-    // Validate input
+console.log(username, email, password);
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
-
-    // Password strength validation
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
-
-    // Check if user exists
     const existingUser = await localDb.getUserByEmail(email);
     if (existingUser) {
       return res.status(409).json({ error: 'User already exists' });
     }
-
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Store user
     const user = {
       id: Date.now().toString(),
       username,
@@ -42,10 +31,7 @@ exports.register = async (req, res) => {
       createdAt: new Date().toISOString()
     };
     await localDb.saveUser(user);
-
-    // Generate token
     const token = jwt.generateToken({ id: user.id, email: user.email });
-
     res.status(201).json({
       message: 'User registered successfully',
       token,
@@ -60,27 +46,18 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // Validate input
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-
-    // Find user
     const user = await localDb.getUserByEmail(email);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    // Generate token
     const token = jwt.generateToken({ id: user.id, email: user.email });
-
     res.json({
       message: 'Login successful',
       token,
@@ -95,18 +72,14 @@ exports.login = async (req, res) => {
 exports.verify = async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
-    
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
-
     const decoded = jwt.verifyToken(token);
     const user = await localDb.getUserByEmail(decoded.email);
-
     if (!user) {
       return res.status(404).json({ error: 'User not found', valid: false });
     }
-
     res.json({
       valid: true,
       user: {
@@ -120,22 +93,17 @@ exports.verify = async (req, res) => {
   }
 };
 
-// Get user profile (protected route example)
 exports.getProfile = async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
-    
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
-
     const decoded = jwt.verifyToken(token);
     const user = await localDb.getUserByEmail(decoded.email);
-    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-
     res.json({
       user: {
         id: user.id,
