@@ -17,11 +17,9 @@ exports.createQueue = (name) => {
     }
   });
 
-  // Process jobs
   queue.process(async (job) => {
     console.log(`Processing job ${job.id}:`, job.data);
     
-    // Simulate computation
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     return {

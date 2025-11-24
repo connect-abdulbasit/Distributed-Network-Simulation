@@ -1,8 +1,7 @@
 const logger = require('./logger');
 
-// Alert cooldown to prevent spam
 const alertCooldown = new Map();
-const COOLDOWN_PERIOD = 60000; // 1 minute
+const COOLDOWN_PERIOD = 60000;
 
 function canSendAlert(serviceUrl, alertType) {
   const key = `${serviceUrl}-${alertType}`;
@@ -38,7 +37,6 @@ exports.sendFailureAlert = (healthData, errorMessage) => {
 
   logger.logError(`ALERT: ${healthData.name} is down!`, alert);
   
-  // TODO: Integrate with alerting systems (PagerDuty, Slack, Email, etc.)
   console.error('\n🚨 CRITICAL ALERT 🚨');
   console.error(JSON.stringify(alert, null, 2));
   console.error('');

@@ -1,15 +1,12 @@
 const computeTasks = require('../tasks/computeTasks');
 const { createQueue } = require('../queue/bullQueue');
 
-// Initialize queue
 const jobQueue = createQueue('compute-jobs');
 
-// Helper function to add artificial delay
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Direct computation (synchronous)
 exports.computeDirect = async (req, res) => {
   try {
     const { operation, operands } = req.body;
@@ -92,7 +89,6 @@ exports.computeDirect = async (req, res) => {
   }
 };
 
-// Submit computation job (asynchronous)
 exports.submitJob = async (req, res) => {
   try {
     const { type, data } = req.body;
@@ -119,7 +115,6 @@ exports.submitJob = async (req, res) => {
   }
 };
 
-// Get job status
 exports.getJobStatus = async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -145,7 +140,6 @@ exports.getJobStatus = async (req, res) => {
   }
 };
 
-// Get queue stats
 exports.getStats = async (req, res) => {
   try {
     const counts = await jobQueue.getJobCounts();

@@ -9,6 +9,7 @@ A distributed microservices system demonstrating load balancing, fault tolerance
 - **Compute Service** (Port 3003): Heavy computation tasks and job queue
 - **Load Balancer** (Port 3000): Routes requests across multiple service instances
 - **Fault Detector** (Port 3004): Monitors service health and sends alerts
+- **Service Registry** (Port 3005): Dynamic service discovery and registration
 - **Shared Local Database**: SQLite database (`data/local-db.sqlite`) shared across all services
 
 ## Quick Start
@@ -22,12 +23,19 @@ npm install --prefix data-service
 npm install --prefix compute-service
 npm install --prefix load-balancer
 npm install --prefix fault-detector
+npm install --prefix service-registry
 ```
 
 ### 2. Start Services
 
+**Important**: Start the Service Registry first, then other services will register automatically.
+
 ```bash
-# Auth Service
+# Service Registry (start this first)
+cd service-registry
+PORT=3005 node registry-server.js
+
+# Auth Service (in another terminal)
 cd auth-service
 NODE_ENV=development PORT=3001 SERVICE_NAME=auth-service-1 node auth-server.js
 
@@ -47,6 +55,8 @@ PORT=3000 node load-balancer.js
 cd fault-detector
 PORT=3004 node fault-detector.js
 ```
+
+**Note**: The load balancer now uses **dynamic service discovery** by default. Services automatically register themselves on startup and the load balancer discovers them from the registry. To use static configuration instead, set `USE_DYNAMIC_DISCOVERY=false`.
 
 ## API Endpoints & cURL Commands
 

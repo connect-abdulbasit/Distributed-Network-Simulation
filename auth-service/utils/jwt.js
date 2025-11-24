@@ -19,7 +19,6 @@ exports.decodeToken = (token) => {
   return jwt.decode(token);
 };
 
-// Middleware for protecting routes
 exports.authenticate = (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];

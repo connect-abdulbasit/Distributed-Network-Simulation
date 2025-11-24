@@ -1,10 +1,15 @@
 const express = require('express');
 const axios = require('axios');
+const path = require('path');
+const { discoverServices } = require(path.join(__dirname, '../shared/utils/serviceRegistry'));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+
+const USE_DYNAMIC_DISCOVERY = process.env.USE_DYNAMIC_DISCOVERY !== 'false';
+const SERVICE_DISCOVERY_INTERVAL = 15000;
 
 const colors = {
   reset: '\x1b[0m',
@@ -63,58 +68,120 @@ const logger = {
   }
 };
 
-// Service registry with health status
-// Use environment variable to determine if running in Docker or locally
-const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
+const services = {
+  auth: [],
+  data: [],
+  compute: []
+};
 
-// For local development: auth services use ports 3001, 3002, 3003
-// For Docker: set SERVICE_HOST to service name (e.g., 'auth-service-1') and use port 3001
+const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
 const AUTH_PORTS = process.env.AUTH_PORTS ? 
   process.env.AUTH_PORTS.split(',').map(p => parseInt(p.trim())) : 
   [3001, 3002, 3003];
-
-// Data and compute services use different ports to avoid conflicts with auth services
 const DATA_PORTS = process.env.DATA_PORTS ? 
   process.env.DATA_PORTS.split(',').map(p => parseInt(p.trim())) : 
-  [4002, 4003, 4004]; // Multiple data service instances for load balancing
-
+  [4002, 4003, 4004];
 const COMPUTE_PORTS = process.env.COMPUTE_PORTS ? 
   process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) : 
-  [5002, 5003, 5004]; // Multiple compute service instances for load balancing
+  [5002, 5003, 5004];
 
-const services = {
-  auth: AUTH_PORTS.map(port => ({
+function initializeStaticServices() {
+  services.auth = AUTH_PORTS.map(port => ({
     url: `http://${SERVICE_HOST}:${port}`,
     healthy: true,
-    failures: 0
-  })),
-  data: DATA_PORTS.map(port => ({
+    failures: 0,
+    serviceId: `static-auth-${port}`
+  }));
+  services.data = DATA_PORTS.map(port => ({
     url: `http://${SERVICE_HOST}:${port}`,
     healthy: true,
-    failures: 0
-  })),
-  compute: COMPUTE_PORTS.map(port => ({
+    failures: 0,
+    serviceId: `static-data-${port}`
+  }));
+  services.compute = COMPUTE_PORTS.map(port => ({
     url: `http://${SERVICE_HOST}:${port}`,
     healthy: true,
-    failures: 0
-  }))
-};
+    failures: 0,
+    serviceId: `static-compute-${port}`
+  }));
+}
 
-// Round-robin counters
+async function discoverServicesFromRegistry() {
+  if (!USE_DYNAMIC_DISCOVERY) {
+    return;
+  }
+
+  try {
+    const [authServices, dataServices, computeServices] = await Promise.all([
+      discoverServices('auth', true), 
+      discoverServices('data', true),
+      discoverServices('compute', true)
+    ]);
+
+    const updateServiceList = (serviceType, discoveredServices) => {
+      const existingServices = services[serviceType];
+      const existingMap = new Map(existingServices.map(s => [s.url, s]));
+
+      const newServices = discoveredServices.map(discovered => {
+        const existing = existingMap.get(discovered.url);
+        if (existing) {
+          return {
+            ...existing,
+            serviceId: discovered.serviceId,
+            name: discovered.name,
+            metadata: discovered.metadata
+          };
+        } else {
+          logger.info(`[DISCOVERY] New ${serviceType} service discovered: ${discovered.name} at ${discovered.url}`);
+          return {
+            url: discovered.url,
+            healthy: true,
+            failures: 0,
+            serviceId: discovered.serviceId,
+            name: discovered.name,
+            metadata: discovered.metadata
+          };
+        }
+      });
+
+      const discoveredUrls = new Set(discoveredServices.map(s => s.url));
+      const removedServices = existingServices.filter(s => !discoveredUrls.has(s.url));
+      
+      removedServices.forEach(service => {
+        if (service.healthy) {
+          logger.warning(`[DISCOVERY] ${serviceType} service removed from registry: ${service.url}`);
+          service.healthy = false;
+        }
+      });
+
+      return [...newServices, ...removedServices];
+    };
+
+    services.auth = updateServiceList('auth', authServices);
+    services.data = updateServiceList('data', dataServices);
+    services.compute = updateServiceList('compute', computeServices);
+
+  } catch (error) {
+    logger.warning(`[DISCOVERY] Failed to discover services: ${error.message}`);
+    if (services.auth.length === 0 && services.data.length === 0 && services.compute.length === 0) {
+      logger.info('[DISCOVERY] Falling back to static service configuration');
+      initializeStaticServices();
+    }
+  }
+}
+
 const roundRobin = {
   auth: 0,
   data: 0,
   compute: 0
 };
 
-// Request metrics tracking (per service URL)
-const requestMetrics = new Map(); // url -> { total, success, failed, recentRequests }
+const requestMetrics = new Map();
 
-const MAX_FAILURES = 5; // Increased from 3 to 5 to be more tolerant of busy compute services
-const HEALTH_CHECK_INTERVAL = 10000; // 10 seconds
-const REQUEST_TIMEOUT = 10000; // 10 seconds (increased for bcrypt operations)
+const MAX_FAILURES = 5;
+const HEALTH_CHECK_INTERVAL = 10000;
+const REQUEST_TIMEOUT = 10000; 
 
-// Get next healthy service using round-robin
 function getNextHealthyService(serviceType) {
   const serviceList = services[serviceType];
   const healthyServices = serviceList.filter(s => s.healthy);
@@ -123,14 +190,12 @@ function getNextHealthyService(serviceType) {
     throw new Error(`No healthy ${serviceType} services available`);
   }
 
-  // Round-robin selection
   const index = roundRobin[serviceType] % healthyServices.length;
   roundRobin[serviceType]++;
 
   return healthyServices[index];
 }
 
-// Mark service as unhealthy
 function markServiceUnhealthy(serviceType, serviceUrl) {
   const service = services[serviceType].find(s => s.url === serviceUrl);
   if (service) {
@@ -144,9 +209,7 @@ function markServiceUnhealthy(serviceType, serviceUrl) {
   }
 }
 
-// Health check all services
 async function healthCheck() {
-  // Only log health checks for auth services, suppress others
   let healthyCount = 0;
   let unhealthyCount = 0;
 
@@ -154,7 +217,6 @@ async function healthCheck() {
     for (const service of serviceList) {
       try {
         const startTime = Date.now();
-        // Compute services may be busy with long-running tasks, so give them more time
         const timeout = serviceType === 'compute' ? 10000 : 3000;
         const response = await axios.get(`${service.url}/health`, {
           timeout: timeout
@@ -166,18 +228,15 @@ async function healthCheck() {
           service.healthy = true;
           service.failures = 0;
           
-          // Log recovery for all services
           if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
             const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
             if (wasUnhealthy) {
               logger.success(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} ${colors.green}RECOVERED${colors.reset} (${responseTime}ms)`);
             }
-            // Don't log healthy status to reduce noise
           }
           healthyCount++;
         }
       } catch (error) {
-        // For compute services, be more lenient - they may be busy with long-running tasks
         const failureThreshold = serviceType === 'compute' ? MAX_FAILURES * 2 : MAX_FAILURES;
         
         service.failures++;
@@ -185,9 +244,7 @@ async function healthCheck() {
           service.healthy = false;
           unhealthyCount++;
         }
-        // Log failures for all services (but less frequently for compute to reduce noise)
         if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
-          // Only log compute failures if they're getting close to threshold
           if (serviceType !== 'compute' || service.failures >= failureThreshold - 2) {
             const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
             logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message} (${service.failures}/${failureThreshold})`);
@@ -197,7 +254,6 @@ async function healthCheck() {
     }
   }
   
-  // Show summary for all services if any are unhealthy
   const authServices = services.auth || [];
   const authHealthy = authServices.filter(s => s.healthy).length;
   const authTotal = authServices.length;
@@ -223,11 +279,16 @@ async function healthCheck() {
   }
 }
 
-// Start periodic health checks (less frequent to reduce noise)
-setInterval(healthCheck, HEALTH_CHECK_INTERVAL * 2); // Check every 20 seconds instead of 10
-healthCheck(); // Run immediately on startup
+if (USE_DYNAMIC_DISCOVERY) {
+  discoverServicesFromRegistry();
+  setInterval(discoverServicesFromRegistry, SERVICE_DISCOVERY_INTERVAL);
+} else {
+  initializeStaticServices();
+}
 
-// Proxy request to service
+setInterval(healthCheck, HEALTH_CHECK_INTERVAL * 2);
+healthCheck(); 
+
 async function proxyRequest(req, res, serviceType) {
   const requestStartTime = Date.now();
   let attempts = 0;
@@ -239,12 +300,10 @@ async function proxyRequest(req, res, serviceType) {
       const targetUrl = `${service.url}${req.path}`;
       const attemptStartTime = Date.now();
 
-      // Prepare headers - remove host and connection headers that shouldn't be forwarded
       const headers = { ...req.headers };
       delete headers.host;
       delete headers.connection;
       
-      // Ensure Content-Type is set for POST/PUT requests with body
       if ((req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && req.body) {
         if (!headers['content-type']) {
           headers['content-type'] = 'application/json';
@@ -270,16 +329,13 @@ async function proxyRequest(req, res, serviceType) {
       const responseTime = Date.now() - attemptStartTime;
       const totalTime = Date.now() - requestStartTime;
 
-      // Mark service as healthy on successful request
       if (service.failures > 0) {
         service.failures = 0;
       }
 
-      // Log the request with port number highlighted
       const port = new URL(service.url).port;
       logger.request(req.method, req.path, service.url, response.status, responseTime, port);
 
-      // Track request metrics
       trackRequest(service.url, response.status < 400);
 
       return res.status(response.status).json(response.data);
@@ -296,7 +352,6 @@ async function proxyRequest(req, res, serviceType) {
       if (attempts >= maxAttempts) {
         logger.error(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed after ${maxAttempts} attempts (${responseTime}ms)`);
         
-        // Track failed request (if we know which service failed)
         if (error.config?.url) {
           const failedUrl = new URL(error.config.url).origin;
           trackRequest(failedUrl, false);
@@ -310,50 +365,12 @@ async function proxyRequest(req, res, serviceType) {
       }
 
       logger.warning(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed (attempt ${attempts}/${maxAttempts}): ${error.message}`);
-
-      // Wait before retry
+      
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 }
 
-// Route handlers
-app.all('/api/auth/*', (req, res) => proxyRequest(req, res, 'auth'));
-app.all('/api/data/*', (req, res) => proxyRequest(req, res, 'data'));
-app.all('/api/compute/*', (req, res) => proxyRequest(req, res, 'compute'));
-
-// Load balancer health endpoint - returns load balancer's own health status
-app.get('/health', (req, res) => {
-  const healthStatus = {};
-  
-  for (const [serviceType, serviceList] of Object.entries(services)) {
-    healthStatus[serviceType] = {
-      total: serviceList.length,
-      healthy: serviceList.filter(s => s.healthy).length,
-      unhealthy: serviceList.filter(s => !s.healthy).length,
-      services: serviceList.map(s => ({
-        url: s.url,
-        healthy: s.healthy,
-        failures: s.failures
-      }))
-    };
-  }
-
-  // Determine overall load balancer health
-  const allServicesHealthy = Object.values(healthStatus).every(
-    status => status.unhealthy === 0
-  );
-
-  res.json({
-    status: allServicesHealthy ? 'healthy' : 'degraded',
-    loadBalancer: 'operational',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    services: healthStatus
-  });
-});
-
-// Track request metrics
 function trackRequest(serviceUrl, isSuccess) {
   if (!requestMetrics.has(serviceUrl)) {
     requestMetrics.set(serviceUrl, {
@@ -363,17 +380,16 @@ function trackRequest(serviceUrl, isSuccess) {
       recentRequests: []
     });
   }
-  
+
   const metrics = requestMetrics.get(serviceUrl);
   metrics.total++;
-  
+
   if (isSuccess) {
     metrics.success++;
   } else {
     metrics.failed++;
   }
-  
-  // Keep only last 60 seconds of requests for rate calculation
+
   const now = Date.now();
   metrics.recentRequests = metrics.recentRequests.filter(
     time => now - time < 60000
@@ -381,7 +397,6 @@ function trackRequest(serviceUrl, isSuccess) {
   metrics.recentRequests.push(now);
 }
 
-// Get request metrics
 function getRequestMetrics() {
   const metrics = {};
   for (const [serviceType, serviceList] of Object.entries(services)) {
@@ -396,12 +411,11 @@ function getRequestMetrics() {
           success: serviceMetrics.success,
           failed: serviceMetrics.failed,
           requestsPerSecond: (serviceMetrics.recentRequests.length / 60).toFixed(2),
-          successRate: serviceMetrics.total > 0 
+          successRate: serviceMetrics.total > 0
             ? ((serviceMetrics.success / serviceMetrics.total) * 100).toFixed(2) + '%'
             : '0%'
         };
       } else {
-        // Initialize empty metrics
         metrics[service.url] = {
           name: `${serviceType}-${service.url.split(':').pop()}`,
           type: serviceType,
@@ -418,7 +432,39 @@ function getRequestMetrics() {
   return metrics;
 }
 
-// Service status endpoint
+app.all('/api/auth/*', (req, res) => proxyRequest(req, res, 'auth'));
+app.all('/api/data/*', (req, res) => proxyRequest(req, res, 'data'));
+app.all('/api/compute/*', (req, res) => proxyRequest(req, res, 'compute'));
+
+app.get('/health', (req, res) => {
+  const healthStatus = {};
+
+  for (const [serviceType, serviceList] of Object.entries(services)) {
+    healthStatus[serviceType] = {
+      total: serviceList.length,
+      healthy: serviceList.filter(s => s.healthy).length,
+      unhealthy: serviceList.filter(s => !s.healthy).length,
+      services: serviceList.map(s => ({
+        url: s.url,
+        healthy: s.healthy,
+        failures: s.failures
+      }))
+    };
+  }
+
+  const allServicesHealthy = Object.values(healthStatus).every(
+    status => status.unhealthy === 0
+  );
+
+  res.json({
+    status: allServicesHealthy ? 'healthy' : 'degraded',
+    loadBalancer: 'operational',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    services: healthStatus
+  });
+});
+
 app.get('/status', (req, res) => {
   res.json({
     services,
@@ -428,7 +474,6 @@ app.get('/status', (req, res) => {
   });
 });
 
-// Request metrics endpoint (for fault detector)
 app.get('/api/metrics', (req, res) => {
   res.json({
     metrics: getRequestMetrics(),
@@ -436,7 +481,6 @@ app.get('/api/metrics', (req, res) => {
   });
 });
 
-// Error handling
 app.use((err, req, res, next) => {
   logger.error(`Internal error: ${err.message}`);
   res.status(500).json({
@@ -445,23 +489,38 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log('\n' + '='.repeat(60));
   logger.success(`${colors.bright}Load Balancer started${colors.reset}`);
   logger.info(`Listening on port ${colors.cyan}${PORT}${colors.reset}`);
-  console.log('='.repeat(60));
-  
-  logger.info(`${colors.bright}Service Configuration:${colors.reset}`);
-  for (const [serviceType, serviceList] of Object.entries(services)) {
-    console.log(`  ${colors.blue}${serviceType.toUpperCase()}${colors.reset}:`);
-    serviceList.forEach((service, index) => {
-      const status = service.healthy ? 
-        `${colors.green}●${colors.reset} healthy` : 
-        `${colors.red}●${colors.reset} unhealthy`;
-      console.log(`    ${index + 1}. ${colors.magenta}${service.url}${colors.reset} - ${status}`);
-    });
+
+  if (USE_DYNAMIC_DISCOVERY) {
+    logger.info(`${colors.bright}Service Discovery:${colors.reset} ${colors.green}DYNAMIC${colors.reset} (registry)`);
+  } else {
+    logger.info(`${colors.bright}Service Discovery:${colors.reset} ${colors.yellow}STATIC${colors.reset} (config)`);
+    initializeStaticServices();
   }
-  console.log('='.repeat(60) + '\n');
+
+  console.log('='.repeat(60));
+
+  setTimeout(() => {
+    logger.info(`${colors.bright}Service Configuration:${colors.reset}`);
+    for (const [serviceType, serviceList] of Object.entries(services)) {
+      if (serviceList.length > 0) {
+        console.log(`  ${colors.blue}${serviceType.toUpperCase()}${colors.reset}:`);
+        serviceList.forEach((service, index) => {
+          const status = service.healthy ?
+            `${colors.green}●${colors.reset} healthy` :
+            `${colors.red}●${colors.reset} unhealthy`;
+          const name = service.name ? ` (${service.name})` : '';
+          console.log(`    ${index + 1}. ${colors.magenta}${service.url}${colors.reset}${name} - ${status}`);
+        });
+      } else {
+        console.log(`  ${colors.blue}${serviceType.toUpperCase()}${colors.reset}: ${colors.yellow}No services discovered${colors.reset}`);
+      }
+    }
+    console.log('='.repeat(60) + '\n');
+  }, 2000);
 });
 
 module.exports = app;

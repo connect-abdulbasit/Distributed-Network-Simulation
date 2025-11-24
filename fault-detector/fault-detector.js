@@ -4,31 +4,25 @@ const path = require('path');
 const logger = require('./logger');
 const alerts = require('./alerts');
 
-// Load services configuration
 const servicesConfig = require('./services.json');
 
-// Determine if running locally or in Docker/Kubernetes
 const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
 const IS_LOCAL = SERVICE_HOST === 'localhost';
+const SERVICE_REGISTRY_URL = process.env.SERVICE_REGISTRY_URL || 'http://localhost:3005';
+const USE_SERVICE_REGISTRY = process.env.USE_SERVICE_REGISTRY !== 'false';
 
-// Service health tracking
 const serviceHealth = new Map();
 
-// Request metrics tracking
-const requestMetrics = new Map(); // url -> { total, success, failed, lastRequest }
+const requestMetrics = new Map();
 
-const CHECK_INTERVAL = 5000; // 5 seconds
-const ALERT_THRESHOLD = 3; // Alert after 3 consecutive failures
-const RESPONSE_TIME_WARNING = 1000; // Warn if response time > 1s
+const CHECK_INTERVAL = 5000;
+const ALERT_THRESHOLD = 3;
+const RESPONSE_TIME_WARNING = 1000;
 
-// Convert service URLs based on environment (local vs Docker)
 function getServiceUrl(instanceUrl, serviceType) {
   if (IS_LOCAL) {
-    // For local development, use localhost with correct ports
     const url = new URL(instanceUrl);
     const hostname = url.hostname;
-    
-    // Map Docker service names to localhost ports
     if (hostname.includes('auth-service-1')) return 'http://localhost:3001';
     if (hostname.includes('auth-service-2')) return 'http://localhost:3002';
     if (hostname.includes('auth-service-3')) return 'http://localhost:3003';
@@ -43,46 +37,119 @@ function getServiceUrl(instanceUrl, serviceType) {
     
     if (hostname.includes('load-balancer')) return 'http://localhost:3000';
     
-    // Fallback: replace hostname with localhost, keep port
     return instanceUrl.replace(hostname, 'localhost');
   }
   
-  // For Docker/Kubernetes, use original URL
   return instanceUrl;
 }
 
-// Initialize health tracking
-function initializeHealthTracking() {
+function createHealthEntry(name, type, url, registryManaged = false) {
+  return {
+    name,
+    type,
+    url,
+    status: 'unknown',
+    consecutiveFailures: 0,
+    lastCheck: null,
+    lastSuccess: null,
+    responseTime: null,
+    uptime: 0,
+    totalChecks: 0,
+    successfulChecks: 0,
+    registryManaged
+  };
+}
+
+function createMetricsEntry() {
+  return {
+    total: 0,
+    success: 0,
+    failed: 0,
+    lastRequest: null,
+    requestsPerSecond: 0,
+    recentRequests: []
+  };
+}
+
+function ensureServiceTracked({ name, type, url, registryManaged = false }) {
+  const normalizedUrl = getServiceUrl(url, type);
+  if (!serviceHealth.has(normalizedUrl)) {
+    serviceHealth.set(normalizedUrl, createHealthEntry(name, type, normalizedUrl, registryManaged));
+    requestMetrics.set(normalizedUrl, createMetricsEntry());
+  } else {
+    const entry = serviceHealth.get(normalizedUrl);
+    entry.name = name;
+    entry.type = type;
+    entry.registryManaged = registryManaged;
+  }
+}
+
+function loadStaticServices() {
   for (const [serviceType, instances] of Object.entries(servicesConfig.services)) {
-    for (const instance of instances) {
-      const serviceUrl = getServiceUrl(instance.url, serviceType);
-      serviceHealth.set(serviceUrl, {
+    instances.forEach(instance => {
+      ensureServiceTracked({
         name: instance.name,
         type: serviceType,
-        url: serviceUrl,
-        status: 'unknown',
-        consecutiveFailures: 0,
-        lastCheck: null,
-        lastSuccess: null,
-        responseTime: null,
-        uptime: 0,
-        totalChecks: 0,
-        successfulChecks: 0
+        url: instance.url,
+        registryManaged: false
       });
-      
-      // Initialize request metrics
-      requestMetrics.set(serviceUrl, {
-        total: 0,
-        success: 0,
-        failed: 0,
-        lastRequest: null,
-        requestsPerSecond: 0,
-        recentRequests: [] // Last 60 seconds of requests
-      });
+    });
+  }
+}
+
+async function fetchServicesFromRegistry() {
+  try {
+    const response = await axios.get(`${SERVICE_REGISTRY_URL}/api/registry/services`);
+    return response.data.services || [];
+  } catch (error) {
+    console.error('[FAULT DETECTOR] Failed to fetch services from registry:', error.message);
+    return null;
+  }
+}
+
+async function syncServicesFromRegistry() {
+  if (!USE_SERVICE_REGISTRY) {
+    return;
+  }
+
+  const registryServices = await fetchServicesFromRegistry();
+  if (!registryServices) {
+    return;
+  }
+
+  const activeUrls = new Set();
+
+  registryServices.forEach(service => {
+    const serviceType = service.serviceType || service.type;
+    if (!serviceType || !service.url) {
+      return;
+    }
+
+    const normalizedUrl = getServiceUrl(service.url, serviceType);
+    activeUrls.add(normalizedUrl);
+
+    ensureServiceTracked({
+      name: service.name || service.serviceId || `${serviceType}-${normalizedUrl}`,
+      type: serviceType,
+      url: service.url,
+      registryManaged: true
+    });
+  });
+
+  for (const [url, health] of serviceHealth.entries()) {
+    if (health.registryManaged && !activeUrls.has(url)) {
+      console.log(`[FAULT DETECTOR] Removing service ${health.name} (${url}) - no longer in registry`);
+      serviceHealth.delete(url);
+      requestMetrics.delete(url);
     }
   }
-  
-  // Log service URLs being monitored
+}
+
+async function initializeHealthTracking() {
+  loadStaticServices();
+  if (USE_SERVICE_REGISTRY) {
+    await syncServicesFromRegistry();
+  }
   console.log(`[FAULT DETECTOR] Monitoring ${serviceHealth.size} services`);
   if (IS_LOCAL) {
     console.log(`[FAULT DETECTOR] Running in LOCAL mode (using localhost)`);
@@ -94,7 +161,6 @@ function initializeHealthTracking() {
   }
 }
 
-// Check service health
 async function checkServiceHealth(serviceUrl) {
   const startTime = Date.now();
   const healthData = serviceHealth.get(serviceUrl);
@@ -108,7 +174,6 @@ async function checkServiceHealth(serviceUrl) {
     const now = new Date().toISOString();
 
     if (response.status === 200) {
-      // Service is healthy
       const wasUnhealthy = healthData.status === 'unhealthy';
       
       healthData.status = 'healthy';
@@ -119,12 +184,10 @@ async function checkServiceHealth(serviceUrl) {
       healthData.totalChecks++;
       healthData.successfulChecks++;
 
-      // Calculate uptime percentage
       healthData.uptime = (healthData.successfulChecks / healthData.totalChecks) * 100;
 
       logger.logHealthCheck(healthData.name, 'healthy', responseTime);
 
-      // Emit WebSocket event for health status update (NOT counting health checks as requests)
       emitWebSocketEvent('service-health-update', {
         type: 'health-update',
         service: {
@@ -138,10 +201,8 @@ async function checkServiceHealth(serviceUrl) {
         }
       });
 
-      // Alert if service recovered
       if (wasUnhealthy) {
         alerts.sendRecoveryAlert(healthData);
-        // Emit recovery event via WebSocket
         emitWebSocketEvent('service-recovery', {
           type: 'recovery',
           service: {
@@ -154,11 +215,9 @@ async function checkServiceHealth(serviceUrl) {
         });
       }
 
-      // Warn if response time is slow
       if (responseTime > RESPONSE_TIME_WARNING) {
         logger.logWarning(healthData.name, `Slow response time: ${responseTime}ms`);
         alerts.sendSlowResponseAlert(healthData, responseTime);
-        // Emit slow response warning via WebSocket
         emitWebSocketEvent('slow-response', {
           type: 'slow-response',
           service: {
@@ -173,7 +232,6 @@ async function checkServiceHealth(serviceUrl) {
       return true;
     }
   } catch (error) {
-    // Service is unhealthy
     const responseTime = Date.now() - startTime;
     const now = new Date().toISOString();
 
@@ -186,7 +244,6 @@ async function checkServiceHealth(serviceUrl) {
 
     logger.logHealthCheck(healthData.name, 'unhealthy', responseTime, error.message);
 
-    // Emit WebSocket event for health status update (NOT counting health checks as requests)
     emitWebSocketEvent('service-health-update', {
       type: 'health-update',
       service: {
@@ -202,10 +259,8 @@ async function checkServiceHealth(serviceUrl) {
       }
     });
 
-    // Send alert if threshold reached
     if (healthData.consecutiveFailures >= ALERT_THRESHOLD) {
       alerts.sendFailureAlert(healthData, error.message);
-      // Emit failure alert via WebSocket
       emitWebSocketEvent('service-failure', {
         type: 'failure',
         severity: 'CRITICAL',
@@ -223,8 +278,8 @@ async function checkServiceHealth(serviceUrl) {
   }
 }
 
-// Check all services
 async function checkAllServices() {
+  await syncServicesFromRegistry();
   logger.log('Running health checks on all services...');
 
   const checks = Array.from(serviceHealth.keys()).map(url => 
@@ -233,11 +288,9 @@ async function checkAllServices() {
 
   await Promise.all(checks);
 
-  // Generate summary
   const summary = generateHealthSummary();
   logger.logSummary(summary);
   
-  // Emit periodic health summary via WebSocket
   const status = getHealthStatus();
   const metrics = getRequestMetrics();
   emitWebSocketEvent('health-summary', {
@@ -248,7 +301,6 @@ async function checkAllServices() {
   });
 }
 
-// Generate health summary
 function generateHealthSummary() {
   const summary = {
     timestamp: new Date().toISOString(),
@@ -283,7 +335,6 @@ function generateHealthSummary() {
   return summary;
 }
 
-// Get current health status
 function getHealthStatus() {
   const status = {};
   
@@ -306,7 +357,6 @@ function getHealthStatus() {
   return status;
 }
 
-// Express API for fault detector
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -318,20 +368,17 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
-const PORT = process.env.PORT || 3005;
+const PORT = process.env.PORT || 3004;
 
 app.use(express.json());
 
-// Serve dashboard HTML
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/dashboard.html');
 });
 
-// WebSocket connection handling
 io.on('connection', (socket) => {
   console.log(`[WebSocket] Client connected: ${socket.id}`);
   
-  // Send current health status to newly connected client
   const status = getHealthStatus();
   const summary = generateHealthSummary();
   const metrics = getRequestMetrics();
@@ -346,7 +393,6 @@ io.on('connection', (socket) => {
     console.log(`[WebSocket] Client disconnected: ${socket.id}`);
   });
   
-  // Allow clients to request current status
   socket.on('request-status', () => {
     const status = getHealthStatus();
     const summary = generateHealthSummary();
@@ -360,13 +406,11 @@ io.on('connection', (socket) => {
   });
 });
 
-// Update request rate (requests per second)
 function updateRequestRate(serviceUrl) {
   const metrics = requestMetrics.get(serviceUrl);
   if (!metrics) return;
   
   const now = Date.now();
-  // Keep only requests from last 60 seconds
   metrics.recentRequests = metrics.recentRequests.filter(
     time => now - time < 60000
   );
@@ -374,7 +418,6 @@ function updateRequestRate(serviceUrl) {
   metrics.requestsPerSecond = metrics.recentRequests.length / 60;
 }
 
-// Get request metrics for all services
 function getRequestMetrics() {
   const metrics = {};
   for (const [url, health] of serviceHealth.entries()) {
@@ -398,7 +441,6 @@ function getRequestMetrics() {
   return metrics;
 }
 
-// Helper function to emit WebSocket events
 function emitWebSocketEvent(event, data) {
   io.emit(event, {
     ...data,
@@ -406,10 +448,9 @@ function emitWebSocketEvent(event, data) {
   });
 }
 
-// Fetch request metrics from load balancer
 const LOAD_BALANCER_URL = process.env.LOAD_BALANCER_URL || 'http://localhost:3000';
 
-let previousMetrics = {}; // Track previous metrics to detect changes
+let previousMetrics = {};
 
 async function fetchRequestMetricsFromLoadBalancer() {
   try {
@@ -418,9 +459,7 @@ async function fetchRequestMetricsFromLoadBalancer() {
     });
     
     if (response.data && response.data.metrics) {
-      // Update request metrics from load balancer
       for (const [url, metrics] of Object.entries(response.data.metrics)) {
-        // Find matching service by URL (exact match or port match)
         for (const [serviceUrl, health] of serviceHealth.entries()) {
           const servicePort = new URL(serviceUrl).port;
           const metricsPort = new URL(metrics.url).port;
@@ -428,11 +467,9 @@ async function fetchRequestMetricsFromLoadBalancer() {
           if (serviceUrl === metrics.url || servicePort === metricsPort) {
             const existingMetrics = requestMetrics.get(serviceUrl);
             if (existingMetrics) {
-              // Check if metrics changed (new request)
               const prev = previousMetrics[url] || { total: 0, success: 0, failed: 0 };
               
               if (metrics.total > prev.total) {
-                // New request detected - emit event for animation
                 const isSuccess = metrics.success > prev.success;
                 emitWebSocketEvent('request-event', {
                   type: 'request',
@@ -446,7 +483,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
                 });
               }
               
-              // Update with load balancer metrics
               existingMetrics.total = metrics.total;
               existingMetrics.success = metrics.success;
               existingMetrics.failed = metrics.failed;
@@ -459,10 +495,8 @@ async function fetchRequestMetricsFromLoadBalancer() {
         }
       }
       
-      // Store current metrics for next comparison
       previousMetrics = JSON.parse(JSON.stringify(response.data.metrics));
       
-      // Emit updated metrics
       const allMetrics = getRequestMetrics();
       emitWebSocketEvent('request-metrics', {
         type: 'metrics',
@@ -470,19 +504,15 @@ async function fetchRequestMetricsFromLoadBalancer() {
       });
     }
   } catch (error) {
-    // Silently fail - load balancer might not be available
-    // Only log if it's a new error (not just connection refused)
     if (!error.message.includes('ECONNREFUSED')) {
       console.error('[FAULT DETECTOR] Failed to fetch metrics from load balancer:', error.message);
     }
   }
 }
 
-// Fetch request metrics from load balancer periodically
-setInterval(fetchRequestMetricsFromLoadBalancer, 1000); // Every second
-fetchRequestMetricsFromLoadBalancer(); // Fetch immediately
+setInterval(fetchRequestMetricsFromLoadBalancer, 1000);
+fetchRequestMetricsFromLoadBalancer();
 
-// Health endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -491,7 +521,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Get service health status
 app.get('/api/status', (req, res) => {
   const status = getHealthStatus();
   const summary = generateHealthSummary();
@@ -505,7 +534,6 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Get specific service status
 app.get('/api/status/:serviceType', (req, res) => {
   const { serviceType } = req.params;
   const status = getHealthStatus();
@@ -521,7 +549,6 @@ app.get('/api/status/:serviceType', (req, res) => {
   });
 });
 
-// Manual health check trigger
 app.post('/api/check', async (req, res) => {
   await checkAllServices();
   const status = getHealthStatus();
@@ -535,7 +562,6 @@ app.post('/api/check', async (req, res) => {
   });
 });
 
-// Get request metrics
 app.get('/api/metrics', (req, res) => {
   const metrics = getRequestMetrics();
   res.json({
@@ -544,17 +570,19 @@ app.get('/api/metrics', (req, res) => {
   });
 });
 
-// Start server and monitoring
+async function startMonitoring() {
+  await initializeHealthTracking();
+  await checkAllServices();
+  setInterval(checkAllServices, CHECK_INTERVAL);
+}
+
+startMonitoring().catch(error => {
+  console.error('[FAULT DETECTOR] Failed to start monitoring:', error);
+});
+
 server.listen(PORT, () => {
   console.log(`[FAULT DETECTOR] Running on port ${PORT}`);
   console.log(`[WebSocket] Server ready for connections on ws://localhost:${PORT}`);
-  
-  // Initialize and start monitoring
-  initializeHealthTracking();
-  checkAllServices(); // Run immediately
-  
-  // Schedule periodic checks
-  setInterval(checkAllServices, CHECK_INTERVAL);
 });
 
 module.exports = app;

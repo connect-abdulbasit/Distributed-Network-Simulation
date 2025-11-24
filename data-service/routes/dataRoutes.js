@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const dataController = require('../controllers/dataController');
 
-// Health check endpoint (must be before /:key route to avoid conflict)
 router.get('/health', (req, res) => {
   res.json({
     status: 'healthy',

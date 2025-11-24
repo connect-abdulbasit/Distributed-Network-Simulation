@@ -1,0 +1,21 @@
+{
+  "name": "service-registry",
+  "version": "1.0.0",
+  "description": "Dynamic service registry for service discovery",
+  "main": "registry-server.js",
+  "scripts": {
+    "start": "node registry-server.js",
+    "dev": "nodemon registry-server.js"
+  },
+  "keywords": ["service-registry", "service-discovery"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+

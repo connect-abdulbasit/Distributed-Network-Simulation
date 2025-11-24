@@ -1,4 +1,3 @@
-// Heavy computation tasks
 
 exports.add = (numbers) => {
   if (!Array.isArray(numbers) || numbers.length === 0) {

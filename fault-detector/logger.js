@@ -4,7 +4,6 @@ const path = require('path');
 const LOG_DIR = process.env.LOG_DIR || './logs';
 const LOG_FILE = path.join(LOG_DIR, 'fault-detector.log');
 
-// Ensure log directory exists
 if (!fs.existsSync(LOG_DIR)) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
 }

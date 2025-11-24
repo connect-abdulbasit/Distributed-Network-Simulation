@@ -18,7 +18,6 @@ exports.createData = async (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    // Use atomic insert operation that fails if key already exists
     try {
       const result = await localDb.insertDataItem(dataItem);
       
@@ -31,16 +30,13 @@ exports.createData = async (req, res) => {
         data: dataItem
       });
     } catch (error) {
-      // Handle unique constraint violation
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.message === 'Key already exists') {
         return res.status(409).json({ error: 'Key already exists' });
       }
-      // Re-throw other errors to be handled by outer catch
       throw error;
     }
   } catch (error) {
     console.error('Create data error:', error);
-    // Don't expose internal errors, but log them
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.message === 'Key already exists') {
       return res.status(409).json({ error: 'Key already exists' });
     }

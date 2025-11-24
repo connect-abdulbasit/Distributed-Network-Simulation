@@ -10,7 +10,6 @@ exports.connectDB = async () => {
   try {
     const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/auth-service';
     
-    // Only try to connect if MongoDB URI is provided and mongoose is available
     if (MONGODB_URI && MONGODB_URI !== 'mongodb://localhost:27017/auth-service') {
       await mongoose.connect(MONGODB_URI, {
         useNewUrlParser: true,
@@ -31,7 +30,6 @@ exports.connectDB = async () => {
       console.log('Database connected successfully');
       return true;
     } else {
-      // Fallback to mock mode if MongoDB is not configured
       console.log('Database connected (mock mode - using in-memory storage)');
       isConnected = true;
       return true;
@@ -40,7 +38,6 @@ exports.connectDB = async () => {
     console.error('Database connection failed:', error);
     isConnected = false;
     
-    // Fallback to mock mode if MongoDB is not available
     console.log('Falling back to mock database mode');
     isConnected = true;
     return true;

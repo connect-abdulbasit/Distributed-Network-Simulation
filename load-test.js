@@ -6,8 +6,7 @@ const LOAD_BALANCER_URL = process.env.LB_URL || 'http://localhost:3000';
 const REQUESTS_PER_SECOND = parseInt(process.env.RPS || '10');
 const DURATION_SECONDS = parseInt(process.env.DURATION || '30');
 const ENDPOINT = process.env.ENDPOINT || '/health';
-const SERVICE_TYPE = process.env.SERVICE_TYPE || 'compute'; // 'auth', 'data', 'compute', 'both', 'all'
-
+const SERVICE_TYPE = process.env.SERVICE_TYPE || 'all'; 
 const colors = {
   reset: '\x1b[0m',
   bright: '\x1b[1m',
@@ -48,14 +47,12 @@ function getServiceEndpoint() {
   } else if (SERVICE_TYPE === 'compute') {
     return '/api/compute/direct';
   } else if (SERVICE_TYPE === 'both') {
-    // Alternate between auth and data
     return (stats.total % 2 === 0) ? '/api/auth/health' : '/api/data/health';
   } else if (SERVICE_TYPE === 'all') {
-    // Alternate between all three services
     const mod = stats.total % 3;
     if (mod === 0) return '/api/auth/health';
     if (mod === 1) return '/api/data/health';
-    return '/api/compute/health';
+    return '/api/compute/direct';
   }
   return '/health';
 }
@@ -155,7 +152,6 @@ async function makeRequest() {
           validateStatus: () => true
         });
       } else if (pathname.includes('/api/compute/direct')) {
-        // Mix of small and large tasks (30% large, 70% small)
         const isLargeTask = Math.random() < 0.3;
         const operations = ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average', 'matrixMultiply'];
         const randomOp = operations[Math.floor(Math.random() * operations.length)];
@@ -212,27 +208,24 @@ async function makeRequest() {
           validateStatus: () => true
         });
       } else if (pathname.includes('/api/compute/job')) {
-        // Mix of small and large jobs (30% large)
         const isLargeJob = Math.random() < 0.3;
         let jobData;
         
-        if (isLargeJob) {
-          // Large job: factorial of 150, fibonacci of 45, or large matrix multiplication
+        if (isLargeJob) {   
           const largeOps = ['factorial', 'fibonacci', 'matrixMultiply'];
           const op = largeOps[Math.floor(Math.random() * largeOps.length)];
           
           if (op === 'factorial') {
             jobData = {
               operation: 'factorial',
-              operands: [150] // Large factorial
+              operands: [150] 
             };
           } else if (op === 'fibonacci') {
             jobData = {
               operation: 'fibonacci',
-              operands: [45] // Large fibonacci
+              operands: [45] 
             };
           } else {
-            // Large matrix multiplication
             const size = 40;
             const matrixA = Array.from({ length: size }, () => 
               Array.from({ length: size }, () => Math.floor(Math.random() * 100))
@@ -246,7 +239,6 @@ async function makeRequest() {
             };
           }
         } else {
-          // Small job
           jobData = {
             operation: 'add',
             operands: [1, 2, 3, 4, 5]
