@@ -1,16 +1,22 @@
 # Distributed-Network-Simulation
 
-A distributed microservices system demonstrating load balancing, fault tolerance, and shared data persistence using local SQLite database.
+A distributed microservices system demonstrating load balancing, fault tolerance, dynamic service discovery, and shared data persistence using local SQLite database.
 
 ## Architecture
 
-- **Auth Service** (Port 3001): User authentication and JWT token management
-- **Data Service** (Port 3002): CRUD operations for data items
-- **Compute Service** (Port 3003): Heavy computation tasks and job queue
-- **Load Balancer** (Port 3000): Routes requests across multiple service instances
-- **Fault Detector** (Port 3004): Monitors service health and sends alerts
-- **Service Registry** (Port 3005): Dynamic service discovery and registration
+The system consists of multiple microservices with load balancing and fault detection:
+
+- **Service Registry** (Port 3005): Central service discovery and registration system
+- **Auth Service** (3 instances on ports 3001-3003): User authentication and JWT token management
+- **Data Service** (3 instances on ports 4002-4004): CRUD operations for data items
+- **Compute Service** (3 instances on ports 5002-5004): Heavy computation tasks and job queue
+- **Load Balancer** (Port 3000): Routes requests across multiple service instances using round-robin and health-based routing
+- **Fault Detector** (Port 3004): Monitors service health, sends alerts, and provides real-time dashboard
 - **Shared Local Database**: SQLite database (`data/local-db.sqlite`) shared across all services
+
+### Service Discovery
+
+All services automatically register with the Service Registry on startup and send periodic heartbeats. The Load Balancer dynamically discovers healthy services from the registry and routes traffic accordingly. If a service becomes unhealthy or stops sending heartbeats, it's automatically removed from the routing pool.
 
 ## Quick Start
 
@@ -26,7 +32,29 @@ npm install --prefix fault-detector
 npm install --prefix service-registry
 ```
 
-### 2. Start Services
+### 2. Start All Services (Recommended)
+
+Use the automated startup script to start all services with proper orchestration:
+
+```bash
+chmod +x start-with-load-balancer.sh
+./start-with-load-balancer.sh
+```
+
+This script will:
+- Clear any processes using required ports
+- Start the Service Registry (port 3005)
+- Start 3 instances of Auth Service (ports 3001-3003)
+- Start 3 instances of Data Service (ports 4002-4004)
+- Start 3 instances of Compute Service (ports 5002-5004)
+- Start the Load Balancer (port 3000)
+- Start the Fault Detector with dashboard (port 3004)
+
+**Press Ctrl+C to stop all services gracefully.**
+
+### 3. Start Services Manually (Alternative)
+
+If you prefer to start services individually:
 
 **Important**: Start the Service Registry first, then other services will register automatically.
 
@@ -35,17 +63,23 @@ npm install --prefix service-registry
 cd service-registry
 PORT=3005 node registry-server.js
 
-# Auth Service (in another terminal)
+# Auth Service Instances (in separate terminals)
 cd auth-service
-NODE_ENV=development PORT=3001 SERVICE_NAME=auth-service-1 node auth-server.js
+PORT=3001 SERVICE_NAME=auth-service-1 JWT_SECRET=your-secret-key node auth-server.js
+PORT=3002 SERVICE_NAME=auth-service-2 JWT_SECRET=your-secret-key node auth-server.js
+PORT=3003 SERVICE_NAME=auth-service-3 JWT_SECRET=your-secret-key node auth-server.js
 
-# Data Service (in another terminal)
+# Data Service Instances (in separate terminals)
 cd data-service
-PORT=3002 SERVICE_NAME=data-service-1 node data-server.js
+PORT=4002 SERVICE_NAME=data-service-1 node data-server.js
+PORT=4003 SERVICE_NAME=data-service-2 node data-server.js
+PORT=4004 SERVICE_NAME=data-service-3 node data-server.js
 
-# Compute Service (in another terminal)
+# Compute Service Instances (in separate terminals)
 cd compute-service
-PORT=3003 SERVICE_NAME=compute-service-1 node compute-server.js
+PORT=5002 SERVICE_NAME=compute-service-1 node compute-server.js
+PORT=5003 SERVICE_NAME=compute-service-2 node compute-server.js
+PORT=5004 SERVICE_NAME=compute-service-3 node compute-server.js
 
 # Load Balancer (in another terminal)
 cd load-balancer
@@ -56,7 +90,7 @@ cd fault-detector
 PORT=3004 node fault-detector.js
 ```
 
-**Note**: The load balancer now uses **dynamic service discovery** by default. Services automatically register themselves on startup and the load balancer discovers them from the registry. To use static configuration instead, set `USE_DYNAMIC_DISCOVERY=false`.
+**Note**: The load balancer uses **dynamic service discovery** by default. Services automatically register themselves on startup and the load balancer discovers them from the registry. To use static configuration instead, set `USE_DYNAMIC_DISCOVERY=false`.
 
 ## API Endpoints & cURL Commands
 
@@ -64,14 +98,23 @@ PORT=3004 node fault-detector.js
 
 #### Check Service Health
 ```bash
-# Auth Service
+# Service Registry
+curl http://localhost:3005/health
+
+# Auth Service Instances
 curl http://localhost:3001/health
-
-# Data Service
 curl http://localhost:3002/health
-
-# Compute Service
 curl http://localhost:3003/health
+
+# Data Service Instances
+curl http://localhost:4002/health
+curl http://localhost:4003/health
+curl http://localhost:4004/health
+
+# Compute Service Instances
+curl http://localhost:5002/health
+curl http://localhost:5003/health
+curl http://localhost:5004/health
 
 # Load Balancer
 curl http://localhost:3000/health
@@ -80,24 +123,38 @@ curl http://localhost:3000/health
 curl http://localhost:3004/health
 ```
 
-#### Check Service Readiness
+#### Check Service Registry
 ```bash
-# Auth Service
-curl http://localhost:3001/ready
+# Get all registered services
+curl http://localhost:3005/api/registry/services
 
-# Data Service
-curl http://localhost:3002/ready
+# Get services by type
+curl http://localhost:3005/api/registry/services/auth
+curl http://localhost:3005/api/registry/services/data
+curl http://localhost:3005/api/registry/services/compute
 
-# Compute Service
-curl http://localhost:3003/ready
+# Get only healthy services
+curl http://localhost:3005/api/registry/services?healthy=true
 ```
 
 ---
 
-## Auth Service (Port 3001)
+## Auth Service (Ports 3001-3003)
+
+The Auth Service handles user authentication and JWT token management. Multiple instances run behind the load balancer for high availability.
 
 ### Register a New User
 ```bash
+# Via Load Balancer (recommended - routes to available instance)
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "demo",
+    "email": "demo@example.com",
+    "password": "secret123"
+  }'
+
+# Or directly to a specific instance
 curl -X POST http://localhost:3001/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
@@ -122,7 +179,8 @@ curl -X POST http://localhost:3001/api/auth/register \
 
 ### Login
 ```bash
-curl -X POST http://localhost:3001/api/auth/login \
+# Via Load Balancer (recommended)
+curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "demo@example.com",
@@ -148,7 +206,8 @@ curl -X POST http://localhost:3001/api/auth/login \
 # Save token from login/register response
 TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
-curl http://localhost:3001/api/auth/verify \
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/auth/verify \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -168,7 +227,8 @@ curl http://localhost:3001/api/auth/verify \
 ```bash
 TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
-curl http://localhost:3001/api/auth/profile \
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/auth/profile \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -186,11 +246,14 @@ curl http://localhost:3001/api/auth/profile \
 
 ---
 
-## Data Service (Port 3002)
+## Data Service (Ports 4002-4004)
+
+The Data Service provides CRUD operations for data items. Multiple instances run behind the load balancer for high availability.
 
 ### Create Data Item
 ```bash
-curl -X POST http://localhost:3002/api/data \
+# Via Load Balancer (recommended)
+curl -X POST http://localhost:3000/api/data \
   -H "Content-Type: application/json" \
   -d '{
     "key": "sample-key",
@@ -216,7 +279,8 @@ curl -X POST http://localhost:3002/api/data \
 
 ### Get Data Item by Key
 ```bash
-curl http://localhost:3002/api/data/sample-key
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/data/sample-key
 ```
 
 **Response:**
@@ -236,7 +300,8 @@ curl http://localhost:3002/api/data/sample-key
 
 ### Get All Data Items
 ```bash
-curl http://localhost:3002/api/data
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/data
 ```
 
 **Response:**
@@ -259,7 +324,8 @@ curl http://localhost:3002/api/data
 
 ### Update Data Item
 ```bash
-curl -X PUT http://localhost:3002/api/data/sample-key \
+# Via Load Balancer (recommended)
+curl -X PUT http://localhost:3000/api/data/sample-key \
   -H "Content-Type: application/json" \
   -d '{
     "value": {"foo": "updated-bar", "count": 100},
@@ -284,7 +350,8 @@ curl -X PUT http://localhost:3002/api/data/sample-key \
 
 ### Delete Data Item
 ```bash
-curl -X DELETE http://localhost:3002/api/data/sample-key
+# Via Load Balancer (recommended)
+curl -X DELETE http://localhost:3000/api/data/sample-key
 ```
 
 **Response:**
@@ -296,12 +363,14 @@ curl -X DELETE http://localhost:3002/api/data/sample-key
 
 ---
 
-## Compute Service (Port 3003)
+## Compute Service (Ports 5002-5004)
+
+The Compute Service handles heavy computation tasks and asynchronous job processing. Multiple instances run behind the load balancer for high availability and parallel processing.
 
 ### Direct Computation (Synchronous)
 ```bash
-# Addition
-curl -X POST http://localhost:3003/api/compute/direct \
+# Addition (via Load Balancer - recommended)
+curl -X POST http://localhost:3000/api/compute/direct \
   -H "Content-Type: application/json" \
   -d '{
     "operation": "add",
@@ -309,7 +378,7 @@ curl -X POST http://localhost:3003/api/compute/direct \
   }'
 
 # Multiplication
-curl -X POST http://localhost:3003/api/compute/direct \
+curl -X POST http://localhost:3000/api/compute/direct \
   -H "Content-Type: application/json" \
   -d '{
     "operation": "multiply",
@@ -317,7 +386,7 @@ curl -X POST http://localhost:3003/api/compute/direct \
   }'
 
 # Factorial
-curl -X POST http://localhost:3003/api/compute/direct \
+curl -X POST http://localhost:3000/api/compute/direct \
   -H "Content-Type: application/json" \
   -d '{
     "operation": "factorial",
@@ -325,7 +394,7 @@ curl -X POST http://localhost:3003/api/compute/direct \
   }'
 
 # Fibonacci
-curl -X POST http://localhost:3003/api/compute/direct \
+curl -X POST http://localhost:3000/api/compute/direct \
   -H "Content-Type: application/json" \
   -d '{
     "operation": "fibonacci",
@@ -346,7 +415,8 @@ curl -X POST http://localhost:3003/api/compute/direct \
 
 ### Submit Computation Job (Asynchronous)
 ```bash
-curl -X POST http://localhost:3003/api/compute/job \
+# Via Load Balancer (recommended)
+curl -X POST http://localhost:3000/api/compute/job \
   -H "Content-Type: application/json" \
   -d '{
     "type": "heavy-computation",
@@ -365,7 +435,8 @@ curl -X POST http://localhost:3003/api/compute/job \
 
 ### Get Job Status
 ```bash
-curl http://localhost:3003/api/compute/job/1
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/compute/job/1
 ```
 
 **Response:**
@@ -387,7 +458,8 @@ curl http://localhost:3003/api/compute/job/1
 
 ### Get Queue Statistics
 ```bash
-curl http://localhost:3003/api/compute/stats
+# Via Load Balancer (recommended)
+curl http://localhost:3000/api/compute/stats
 ```
 
 **Response:**
@@ -406,11 +478,69 @@ curl http://localhost:3003/api/compute/stats
 
 ---
 
+## Service Registry (Port 3005)
+
+The Service Registry provides dynamic service discovery and registration. All services automatically register on startup and send periodic heartbeats to maintain their registration.
+
+### Service Registration
+
+Services register themselves with:
+- `serviceId`: Unique identifier (e.g., `auth-service-1-3001`)
+- `serviceType`: Service type (`auth`, `data`, or `compute`)
+- `url`: Service URL
+- `name`: Service name
+- `metadata`: Additional information (port, host, etc.)
+
+### Heartbeat Mechanism
+
+Services send heartbeats every 10 seconds. If a service doesn't send a heartbeat for 30 seconds, it's marked as unhealthy and removed from the routing pool.
+
+### API Endpoints
+
+```bash
+# Register a service
+curl -X POST http://localhost:3005/api/registry/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "serviceId": "test-service-1",
+    "serviceType": "auth",
+    "url": "http://localhost:3001",
+    "name": "test-service-1"
+  }'
+
+# Send heartbeat
+curl -X POST http://localhost:3005/api/registry/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"serviceId": "test-service-1"}'
+
+# Get all services
+curl http://localhost:3005/api/registry/services
+
+# Get services by type
+curl http://localhost:3005/api/registry/services/auth
+
+# Get only healthy services
+curl http://localhost:3005/api/registry/services?healthy=true
+
+# Deregister a service
+curl -X POST http://localhost:3005/api/registry/deregister \
+  -H "Content-Type: application/json" \
+  -d '{"serviceId": "test-service-1"}'
+```
+
+---
+
 ## Load Balancer (Port 3000)
+
+The Load Balancer routes requests across multiple service instances using:
+- **Round-robin** distribution for even load distribution
+- **Health-based routing** - only routes to healthy services
+- **Automatic failover** - removes unhealthy services from the pool
+- **Dynamic service discovery** - automatically discovers services from the registry
 
 ### Route Requests Through Load Balancer
 
-All service endpoints can be accessed through the load balancer:
+All service endpoints should be accessed through the load balancer for high availability:
 
 ```bash
 # Auth endpoints via load balancer
@@ -461,7 +591,23 @@ curl http://localhost:3000/status
 
 ## Fault Detector (Port 3004)
 
-### Get Service Health Status
+The Fault Detector monitors all services, tracks their health status, and provides real-time alerts. It includes a web-based dashboard for visual monitoring.
+
+### Access the Dashboard
+
+Open your browser and navigate to:
+```
+http://localhost:3004
+```
+
+The dashboard provides:
+- Real-time service health status
+- Response time metrics
+- Service availability statistics
+- Visual alerts for unhealthy services
+- Auto-refresh for live updates
+
+### Get Service Health Status (API)
 ```bash
 curl http://localhost:3004/api/status
 ```
@@ -547,14 +693,33 @@ rm data/local-db.sqlite
 - `NODE_ENV`: Environment (development/production)
 
 ### Data Service
-- `PORT`: Service port (default: 3002)
+- `PORT`: Service port (default: 4002 for first instance)
 - `SERVICE_NAME`: Service instance name (default: data-service-1)
+- `SERVICE_HOST`: Service host (default: localhost)
 
 ### Compute Service
-- `PORT`: Service port (default: 3003)
+- `PORT`: Service port (default: 5002 for first instance)
 - `SERVICE_NAME`: Service instance name (default: compute-service-1)
+- `SERVICE_HOST`: Service host (default: localhost)
 - `REDIS_HOST`: Redis host for job queue (default: localhost)
 - `REDIS_PORT`: Redis port (default: 6379)
+
+### Load Balancer
+- `PORT`: Load balancer port (default: 3000)
+- `USE_DYNAMIC_DISCOVERY`: Enable dynamic service discovery (default: true)
+- `SERVICE_REGISTRY_URL`: Service registry URL (default: http://localhost:3005)
+- `SERVICE_HOST`: Service host for static configuration (default: localhost)
+- `AUTH_PORTS`: Comma-separated auth service ports (default: 3001,3002,3003)
+- `DATA_PORTS`: Comma-separated data service ports (default: 4002,4003,4004)
+- `COMPUTE_PORTS`: Comma-separated compute service ports (default: 5002,5003,5004)
+
+### Service Registry
+- `PORT`: Registry port (default: 3005)
+
+### Fault Detector
+- `PORT`: Fault detector port (default: 3004)
+- `SERVICE_REGISTRY_URL`: Service registry URL (default: http://localhost:3005)
+- `USE_SERVICE_REGISTRY`: Enable dynamic service discovery (default: true)
 
 ### Shared Database
 - `LOCAL_DB_DIR`: Directory for database file (default: `data/`)
@@ -564,21 +729,34 @@ rm data/local-db.sqlite
 
 ## Testing Multiple Instances
 
-See [HOW-MULTIPLE-SERVERS-WORK.md](./HOW-MULTIPLE-SERVERS-WORK.md) for detailed information on running multiple instances of each service.
+The system is configured to run 3 instances of each service by default:
+- **Auth Service**: Ports 3001, 3002, 3003
+- **Data Service**: Ports 4002, 4003, 4004
+- **Compute Service**: Ports 5002, 5003, 5004
 
-### Quick Test with Multiple Auth Instances
+### Quick Test with Multiple Instances
 
 ```bash
-# Start 3 auth service instances
-cd auth-service
-PORT=3001 SERVICE_NAME=auth-service-1 node auth-server.js &
-PORT=3002 SERVICE_NAME=auth-service-2 node auth-server.js &
-PORT=3003 SERVICE_NAME=auth-service-3 node auth-server.js &
+# Test individual instances
+curl http://localhost:3001/health  # Auth instance 1
+curl http://localhost:3002/health  # Auth instance 2
+curl http://localhost:3003/health  # Auth instance 3
 
-# Test each instance
-curl http://localhost:3001/health
-curl http://localhost:3002/health
-curl http://localhost:3003/health
+curl http://localhost:4002/health  # Data instance 1
+curl http://localhost:4003/health  # Data instance 2
+curl http://localhost:4004/health  # Data instance 3
+
+curl http://localhost:5002/health  # Compute instance 1
+curl http://localhost:5003/health  # Compute instance 2
+curl http://localhost:5004/health  # Compute instance 3
+
+# Test load balancing - same request routed to different instances
+for i in {1..10}; do
+  curl -s http://localhost:3000/api/auth/register \
+    -H "Content-Type: application/json" \
+    -d '{"username":"user'$i'","email":"user'$i'@test.com","password":"pass"}' \
+    | grep -o '"service":"[^"]*"'
+done
 ```
 
 ---
@@ -624,12 +802,21 @@ The load test script provides:
 
 ## Notes
 
-- All services share the same SQLite database file (`data/local-db.sqlite`)
-- JWT tokens are valid across all service instances (same `JWT_SECRET`)
-- Health checks are used by load balancer and fault detector for routing decisions
-- The database file is created automatically on first use
-- For production, consider using MongoDB Atlas or a proper database server
-- Load balancer logs are color-coded for better readability:
+- **Shared Database**: All services share the same SQLite database file (`data/local-db.sqlite`)
+- **JWT Tokens**: Valid across all service instances (same `JWT_SECRET`)
+- **Health Checks**: Used by load balancer and fault detector for routing decisions
+- **Auto-Creation**: Database file is created automatically on first use
+- **Service Discovery**: Services automatically register with the registry on startup
+- **Heartbeats**: Services send heartbeats every 10 seconds to maintain registration
+- **Fault Tolerance**: Unhealthy services are automatically removed from the routing pool
+- **Load Balancing**: Round-robin distribution with health-based filtering
+- **Production Considerations**: 
+  - Use MongoDB Atlas or a proper database server instead of SQLite
+  - Use Redis for distributed job queues
+  - Implement proper authentication and authorization
+  - Add rate limiting and request validation
+  - Use environment-specific configuration management
+- **Logging**: Load balancer logs are color-coded for better readability:
   - 🟢 Green: Success/Healthy services
   - 🟡 Yellow: Warnings/Failed requests
   - 🔴 Red: Errors/Unhealthy services

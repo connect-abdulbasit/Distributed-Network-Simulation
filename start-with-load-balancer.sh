@@ -114,22 +114,6 @@ cd ..
 
 sleep 3
 
-echo -e "${GREEN}Starting Compute Service Instance 4 on port 5005...${NC}"
-cd compute-service
-PORT=5005 SERVICE_NAME=compute-service-4 node compute-server.js &
-COMPUTE4_PID=$!
-cd ..
-
-sleep 3
-
-echo -e "${GREEN}Starting Compute Service Instance 5 on port 5006...${NC}"
-cd compute-service
-PORT=5006 SERVICE_NAME=compute-service-5 node compute-server.js &
-COMPUTE5_PID=$!
-cd ..
-
-sleep 3
-
 echo -e "${GREEN}Starting Load Balancer on port 3000...${NC}"
 cd load-balancer
 PORT=3000 node load-balancer.js &
@@ -168,8 +152,6 @@ echo "Compute Service Instances:"
 echo "  - Instance 1 (PID $COMPUTE1_PID): http://localhost:5002"
 echo "  - Instance 2 (PID $COMPUTE2_PID): http://localhost:5003"
 echo "  - Instance 3 (PID $COMPUTE3_PID): http://localhost:5004"
-echo "  - Instance 4 (PID $COMPUTE4_PID): http://localhost:5005"
-echo "  - Instance 5 (PID $COMPUTE5_PID): http://localhost:5006"
 echo ""
 echo "Load Balancer:"
 echo "  - Load Balancer (PID $LB_PID): http://localhost:3000"
@@ -183,7 +165,7 @@ echo "  curl http://localhost:3000/health"
 echo "  curl http://localhost:3000/status"
 echo "  curl -X POST http://localhost:3000/api/auth/register -H 'Content-Type: application/json' -d '{\"username\":\"test\",\"email\":\"test@example.com\",\"password\":\"test123\"}'"
 echo "  curl -X POST http://localhost:3000/api/data -H 'Content-Type: application/json' -d '{\"key\":\"test-key\",\"value\":{\"foo\":\"bar\"}}'"
-echo "  curl -X POST http://localhost:3000/api/compute/direct -H 'Content-Type: application/json' -d '{\"operation\":\"add\",\"operands\":[1,2,3,4,5]}'"
+echo "  curl http://localhost:3000/api/compute/compute"
 echo ""
 echo "Press Ctrl+C to stop all services"
 
@@ -191,7 +173,7 @@ echo "Press Ctrl+C to stop all services"
 cleanup() {
     echo ""
     echo -e "${BLUE}Stopping all services...${NC}"
-    kill $FAULT_PID $LB_PID $COMPUTE1_PID $COMPUTE2_PID $COMPUTE3_PID $COMPUTE4_PID $COMPUTE5_PID $DATA1_PID $DATA2_PID $DATA3_PID $AUTH1_PID $AUTH2_PID $AUTH3_PID $REGISTRY_PID 2>/dev/null
+    kill $FAULT_PID $LB_PID $COMPUTE1_PID $COMPUTE2_PID $COMPUTE3_PID $DATA1_PID $DATA2_PID $DATA3_PID $AUTH1_PID $AUTH2_PID $AUTH3_PID $REGISTRY_PID 2>/dev/null
     echo "All services stopped"
     exit
 }
