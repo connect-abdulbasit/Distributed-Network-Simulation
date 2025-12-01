@@ -25,11 +25,7 @@ exports.getDataById = async (req, res) => {
 };
 
 exports.dataWorker = async (req, res) => {
-  const start = Date.now();
-  while (Date.now() - start < 500) {
-
-    Math.sqrt(Math.random());
-  }
+  await new Promise(resolve => setTimeout(resolve, 500));
   res.json({
     message: 'Data worker completed',
     service: process.env.SERVICE_NAME || 'data-service-1',

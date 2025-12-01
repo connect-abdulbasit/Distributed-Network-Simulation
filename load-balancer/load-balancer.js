@@ -180,7 +180,12 @@ const loadBalancerMetrics = {
   total: 0,
   success: 0,
   failed: 0,
-  recentRequests: []
+  recentRequests: [],
+  failuresByServiceType: {
+    auth: 0,
+    data: 0,
+    compute: 0
+  }
 };
 
 const MAX_FAILURES = 5;
@@ -344,7 +349,7 @@ async function proxyRequest(req, res, serviceType) {
       logger.request(req.method, req.path, service.url, response.status, responseTime, port);
 
       trackRequest(service.url, response.status < 400);
-      trackLoadBalancerRequest(response.status < 400);
+      trackLoadBalancerRequest(response.status < 400, serviceType);
 
       return res.status(response.status).json(response.data);
 
@@ -360,7 +365,7 @@ async function proxyRequest(req, res, serviceType) {
           trackRequest(failedUrl, false);
         }
 
-        trackLoadBalancerRequest(false);
+        trackLoadBalancerRequest(false, serviceType);
 
         return res.status(503).json({
           error: 'Service unavailable',
@@ -402,12 +407,15 @@ function trackRequest(serviceUrl, isSuccess) {
   metrics.recentRequests.push(now);
 }
 
-function trackLoadBalancerRequest(isSuccess) {
+function trackLoadBalancerRequest(isSuccess, serviceType = null) {
   loadBalancerMetrics.total++;
   if (isSuccess) {
     loadBalancerMetrics.success++;
   } else {
     loadBalancerMetrics.failed++;
+    if (serviceType && loadBalancerMetrics.failuresByServiceType.hasOwnProperty(serviceType)) {
+      loadBalancerMetrics.failuresByServiceType[serviceType]++;
+    }
   }
   const now = Date.now();
   loadBalancerMetrics.recentRequests = loadBalancerMetrics.recentRequests.filter(
@@ -429,7 +437,8 @@ function getRequestMetrics() {
     requestsPerSecond: (loadBalancerMetrics.recentRequests.length / 60).toFixed(2),
     successRate: loadBalancerMetrics.total > 0
       ? ((loadBalancerMetrics.success / loadBalancerMetrics.total) * 100).toFixed(2) + '%'
-      : '0%'
+      : '0%',
+    failuresByServiceType: loadBalancerMetrics.failuresByServiceType
   };
 
   for (const [serviceType, serviceList] of Object.entries(services)) {

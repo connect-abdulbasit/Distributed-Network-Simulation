@@ -488,9 +488,49 @@ async function fetchRequestMetricsFromLoadBalancer() {
             serviceHealth.set(lbUrl, createHealthEntry('load-balancer', 'loadbalancer', lbUrl, false));
           }
           const existingMetrics = requestMetrics.get(lbUrl);
-          const prev = previousMetrics[url] || { total: 0, success: 0, failed: 0 };
+          const prev = previousMetrics[url] || { total: 0, success: 0, failed: 0, failuresByServiceType: { auth: 0, data: 0, compute: 0 } };
           
-          // Track failed requests
+          if (metrics.failuresByServiceType) {
+            const prevFailures = prev.failuresByServiceType || { auth: 0, data: 0, compute: 0 };
+            
+            ['auth', 'data', 'compute'].forEach(serviceType => {
+              const newFailures = (metrics.failuresByServiceType[serviceType] || 0) - (prevFailures[serviceType] || 0);
+              if (newFailures > 0) {
+                // Find the first service of this type to avoid double counting
+                let firstServiceUrl = null;
+                for (const [serviceUrl, health] of serviceHealth.entries()) {
+                  if (health.type === serviceType) {
+                    firstServiceUrl = serviceUrl;
+                    break;
+                  }
+                }
+                
+                if (firstServiceUrl) {
+                  const serviceMetrics = requestMetrics.get(firstServiceUrl);
+                  const health = serviceHealth.get(firstServiceUrl);
+                  if (serviceMetrics) {
+                    serviceMetrics.failed += newFailures;
+                    serviceMetrics.total += newFailures;
+                    // Emit failed request events for this service type
+                    for (let i = 0; i < newFailures; i++) {
+                      emitWebSocketEvent('request-event', {
+                        type: 'request',
+                        service: {
+                          name: health.name,
+                          url: firstServiceUrl,
+                          type: serviceType
+                        },
+                        status: 'failed',
+                        timestamp: new Date().toISOString()
+                      });
+                    }
+                  }
+                }
+              }
+            });
+          }
+          
+          // Track general load balancer failures
           if (metrics.failed > prev.failed) {
             const newFailures = metrics.failed - prev.failed;
             for (let i = 0; i < newFailures; i++) {

@@ -90,11 +90,7 @@ exports.computeDirect = async (req, res) => {
 };
 
 exports.computeWorker = async (req, res) => {
-  const start = Date.now();
-  while (Date.now() - start < 550) {
-
-    Math.sqrt(Math.random());
-  }
+  await new Promise(resolve => setTimeout(resolve, 550));
   res.json({
     message: 'Compute worker completed',
     service: process.env.SERVICE_NAME || 'compute-service-1',

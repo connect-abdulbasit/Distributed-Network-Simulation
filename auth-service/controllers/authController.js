@@ -5,12 +5,7 @@ const path = require('path');
 const localDb = require(path.join(__dirname, '../../shared/db/localDb'));
 
 exports.authWorker = async (req, res) => {
-  const start = Date.now();
-  while (Date.now() - start < 800) {
-
-    Math.sqrt(Math.random());
-  }
-
+  await new Promise(resolve => setTimeout(resolve, 800));
   res.json({
     message: 'Auth worker completed',
     service: process.env.SERVICE_NAME || 'auth-service-1',
