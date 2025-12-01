@@ -64,7 +64,6 @@
             50% { opacity: 0.5; }
         }
 
-        /* Summary cards */
         .summary {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -109,7 +108,6 @@
             color: #f59e0b;
         }
 
-        /* Service groups container */
         .service-groups {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
@@ -191,7 +189,6 @@
             color: #ef4444;
         }
 
-        /* Graph container */
         .graph-container {
             position: relative;
             height: 200px;
@@ -245,7 +242,6 @@
             }
         }
 
-        /* Candle/Line graph visualization */
         .request-graph {
             position: relative;
             width: 100%;
@@ -305,11 +301,9 @@
     </div>
 
     <div class="summary" id="summary">
-        <!-- Summary cards will be inserted here -->
     </div>
 
     <div class="service-groups" id="serviceGroups">
-        <!-- Service groups will be inserted here -->
     </div>
 
     <script>
@@ -330,12 +324,9 @@
             data: [],
             compute: []
         };
-        const MAX_GRAPH_POINTS = 60; // Last 60 seconds
-        let lastRequestTotals = { auth: 0, data: 0, compute: 0 }; // Track last known totals
-        let requestRateHistory = { auth: [], data: [], compute: [] }; // Track requests per second
-        let lastGraphUpdate = { auth: 0, data: 0, compute: 0 }; // Track last graph update time
+        const MAX_GRAPH_POINTS = 60;
+        let lastGraphUpdate = { auth: 0, data: 0, compute: 0 };
 
-        // Connection status
         socket.on('connect', () => {
             console.log('Connected to Fault Detector WebSocket');
             statusIndicator.classList.add('connected');
@@ -350,7 +341,6 @@
             connectionText.textContent = 'Disconnected';
         });
 
-        // Initial health status
         socket.on('health-status', (data) => {
             servicesData = data.services || {};
             requestMetricsData = data.requestMetrics || {};
@@ -358,7 +348,6 @@
             updateServiceGroups(servicesData, requestMetricsData);
         });
 
-        // Health summary updates
         socket.on('health-summary', (data) => {
             if (data.summary) updateSummary(data.summary);
             if (data.services) servicesData = data.services;
@@ -366,30 +355,23 @@
             updateServiceGroups(servicesData, requestMetricsData);
         });
 
-        // Request metrics (update immediately)
         socket.on('request-metrics', (data) => {
             if (data.metrics) {
                 requestMetricsData = data.metrics;
-                
-                // Check for new requests and update graphs immediately
                 const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
                 ['auth', 'data', 'compute'].forEach(serviceType => {
                     if (aggregated[serviceType]) {
                         const currentTotal = aggregated[serviceType].total;
                         const lastTotal = lastRequestTotals[serviceType] || 0;
-                        
                         if (currentTotal > lastTotal) {
-                            // New requests detected - update graph immediately
                             updateGraph(serviceType, true);
                         }
                     }
                 });
-                
                 updateServiceGroups(servicesData, requestMetricsData);
             }
         });
 
-        // Individual request events (for graph animation)
         socket.on('request-event', (data) => {
             if (data.service && data.service.type) {
                 const serviceType = data.service.type;
@@ -399,18 +381,25 @@
             }
         });
 
-        // Aggregate metrics by service type
+        let incomingRequestHistory = {
+            auth: [],
+            data: [],
+            compute: []
+        };
+        let lastTotalRequests = {
+            auth: 0,
+            data: 0,
+            compute: 0
+        };
+
         function aggregateMetricsByType(services, metrics) {
             const aggregated = {
                 auth: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 },
                 data: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 },
                 compute: { total: 0, success: 0, failed: 0, healthy: 0, unhealthy: 0, totalServices: 0, rps: 0 }
             };
-
-            // Aggregate from services
             for (const [serviceType, serviceList] of Object.entries(services)) {
                 if (serviceType === 'loadbalancer') continue;
-                
                 if (aggregated[serviceType]) {
                     serviceList.forEach(service => {
                         aggregated[serviceType].totalServices++;
@@ -422,10 +411,8 @@
                     });
                 }
             }
-
-            // Aggregate from metrics
+            const now = Date.now();
             for (const [url, metric] of Object.entries(metrics)) {
-                // Determine service type from URL or metric
                 let serviceType = null;
                 if (metric.type) {
                     serviceType = metric.type;
@@ -436,25 +423,38 @@
                 } else if (url.includes('5002') || url.includes('5003') || url.includes('5004')) {
                     serviceType = 'compute';
                 }
-
                 if (serviceType && aggregated[serviceType]) {
                     aggregated[serviceType].total += metric.total || 0;
                     aggregated[serviceType].success += metric.success || 0;
                     aggregated[serviceType].failed += metric.failed || 0;
-                    aggregated[serviceType].rps += parseFloat(metric.requestsPerSecond || 0);
                 }
             }
-
+            ['auth', 'data', 'compute'].forEach(serviceType => {
+                const currentTotal = aggregated[serviceType].total;
+                const lastTotal = lastTotalRequests[serviceType] || 0;
+                if (currentTotal > lastTotal) {
+                    const newRequests = currentTotal - lastTotal;
+                    incomingRequestHistory[serviceType].push({
+                        time: now,
+                        count: newRequests
+                    });
+                    lastTotalRequests[serviceType] = currentTotal;
+                }
+                incomingRequestHistory[serviceType] = incomingRequestHistory[serviceType].filter(
+                    r => now - r.time < 1000
+                );
+                const requestsInLastSecond = incomingRequestHistory[serviceType].reduce(
+                    (sum, r) => sum + r.count, 0
+                );
+                aggregated[serviceType].rps = requestsInLastSecond;
+            });
             return aggregated;
         }
 
-        // Update summary cards
         function updateSummary(summary) {
             if (!summary) return;
-
             const totalFailed = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.failed || 0), 0);
             const totalRequests = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.total || 0), 0);
-
             summaryContainer.innerHTML = `
                 <div class="summary-card total">
                     <h3>Total Services</h3>
@@ -491,13 +491,10 @@
             return total > 0 ? ((success / total) * 100).toFixed(1) : '0';
         }
 
-        // Update service groups
         function updateServiceGroups(services, metrics) {
             const aggregated = aggregateMetricsByType(services, metrics);
-            
             let html = '';
             const serviceTypes = ['auth', 'data', 'compute'];
-            
             serviceTypes.forEach(serviceType => {
                 const data = aggregated[serviceType];
                 if (data) {
@@ -506,7 +503,6 @@
                     const successRate = data.total > 0 
                         ? ((data.success / data.total) * 100).toFixed(1) + '%'
                         : '0%';
-                    
                     html += `
                         <div class="service-group">
                             <div class="service-group-header">
@@ -515,8 +511,8 @@
                             </div>
                             <div class="service-group-metrics">
                                 <div class="metric-item">
-                                    <div class="metric-label">Total Requests</div>
-                                    <div class="metric-value">${data.total}</div>
+                                    <div class="metric-label">Servers</div>
+                                    <div class="metric-value">${data.totalServices}</div>
                                 </div>
                                 <div class="metric-item">
                                     <div class="metric-label">Success</div>
@@ -527,7 +523,7 @@
                                     <div class="metric-value failed">${data.failed}</div>
                                 </div>
                             </div>
-                            <div class="rps-indicator">${data.rps.toFixed(2)} req/s</div>
+                            <div class="rps-indicator">${data.rps.toFixed(1)} req/s</div>
                             <div class="request-graph" id="graph-${serviceType}">
                                 <svg class="graph-svg" viewBox="0 0 400 150" preserveAspectRatio="none">
                                     <defs>
@@ -544,217 +540,126 @@
                     `;
                 }
             });
-            
             serviceGroupsContainer.innerHTML = html;
-            
-            // Update graphs
             serviceTypes.forEach(serviceType => {
                 updateGraphVisualization(serviceType, aggregated[serviceType]);
             });
         }
 
-        // Update graph data - continuously track request rate for smooth line
         function updateGraph(serviceType, isSuccess) {
             if (!graphData[serviceType]) return;
-            
             const now = Date.now();
             const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
-            const currentTotal = aggregated[serviceType] ? aggregated[serviceType].total : 0;
-            const lastTotal = lastRequestTotals[serviceType] || 0;
-            
-            // Initialize history if needed
-            if (!requestRateHistory[serviceType]) {
-                requestRateHistory[serviceType] = [];
-            }
-            
-            // If total increased, add to history
-            if (currentTotal > lastTotal) {
-                const increase = currentTotal - lastTotal;
-                requestRateHistory[serviceType].push({
-                    time: now,
-                    count: increase
-                });
-                lastRequestTotals[serviceType] = currentTotal;
-            }
-            
-            // Remove requests older than 1 second
-            requestRateHistory[serviceType] = requestRateHistory[serviceType].filter(
-                r => now - r.time < 1000
-            );
-            
-            // Calculate current requests per second
-            const requestsInLastSecond = requestRateHistory[serviceType].reduce(
-                (sum, r) => sum + r.count, 0
-            );
-            
-            // Add data point every second for smooth continuous line
+            const currentRps = aggregated[serviceType] ? aggregated[serviceType].rps : 0;
             const timeSinceLastUpdate = now - (lastGraphUpdate[serviceType] || 0);
-            
-            // Add point every 1 second for smooth continuous line
             if (timeSinceLastUpdate >= 1000) {
                 graphData[serviceType].push({
                     time: now,
-                    value: requestsInLastSecond, // Current requests per second
-                    isRequest: requestsInLastSecond > 0
+                    value: currentRps,
+                    isRequest: currentRps > 0
                 });
-                
                 lastGraphUpdate[serviceType] = now;
-                
-                // Keep only last 60 points
                 if (graphData[serviceType].length > MAX_GRAPH_POINTS) {
                     graphData[serviceType].shift();
                 }
             } else {
-                // Update last point with current value for immediate feedback
                 const lastPoint = graphData[serviceType][graphData[serviceType].length - 1];
                 if (lastPoint) {
-                    lastPoint.value = requestsInLastSecond;
-                    lastPoint.isRequest = requestsInLastSecond > 0;
+                    lastPoint.value = currentRps;
+                    lastPoint.isRequest = currentRps > 0;
                 }
             }
-            
-            // Always update visualization for smooth rendering
             updateGraphVisualization(serviceType, aggregated[serviceType]);
         }
 
-        // Update graph visualization
         function updateGraphVisualization(serviceType, data) {
             const graphContainer = document.getElementById(`graph-${serviceType}`);
             if (!graphContainer) return;
-            
             const path = document.getElementById(`path-${serviceType}`);
             const area = document.getElementById(`area-${serviceType}`);
             if (!path || !area) return;
-            
             const points = graphData[serviceType];
             const width = 400;
             const height = 150;
-            const timeRange = 60000; // 60 seconds
+            const timeRange = 60000;
             const now = Date.now();
-            
             if (points.length === 0) {
-                // No data - straight line at bottom
                 path.setAttribute('d', `M0,${height - 10} L${width},${height - 10}`);
                 path.classList.add('no-requests');
                 area.setAttribute('d', `M0,${height} L${width},${height} L${width},${height - 10} L0,${height - 10} Z`);
                 return;
             }
-            
-            // Calculate max value for scaling - use fixed reasonable scale
             const requestPoints = points.filter(p => p.isRequest && p.value > 0);
-            
-            // Use a fixed scale based on typical request rates
-            // This ensures spikes are proportional and not too large
-            let maxValue = 10; // Default max (10 requests/second = full height)
-            
+            let maxValue = 10;
             if (requestPoints.length > 0) {
                 const values = requestPoints.map(p => p.value);
                 const max = Math.max(...values);
-                
-                // Use adaptive scale: if max is > 10, scale to show it, but cap visualization
-                // This way 5 req/s shows as 50% height, 10 req/s shows as 100% height
                 if (max > 10) {
-                    maxValue = Math.min(max, 20); // Cap at 20 req/s for visualization
+                    maxValue = Math.min(max, 20);
                 } else {
-                    maxValue = 10; // Standard scale for normal traffic
+                    maxValue = 10;
                 }
             }
-            
-            // Build path - show line going up when requests come, straight when no requests
             let pathD = '';
             let areaD = '';
-            
             if (points.length === 0) {
-                // No data - straight line at bottom
                 pathD = `M 0,${height - 10} L ${width},${height - 10}`;
                 areaD = `M 0,${height} L ${width},${height} L ${width},${height - 10} L 0,${height - 10} Z`;
             } else {
-                // Calculate x positions based on time (last 60 seconds)
                 const timeRange = 60000;
                 const now = Date.now();
-                
-                // Sort points by time
                 const sortedPoints = [...points].sort((a, b) => a.time - b.time);
-                
-                // Create smooth line by connecting all points in order
                 sortedPoints.forEach((point, index) => {
                     const timeOffset = now - point.time;
-                    // Calculate x position: older points on left, newer on right
                     const x = Math.max(0, Math.min(width, width - (timeOffset / timeRange) * width));
-                    
-                    // Calculate y position based on request rate (value = requests per second)
                     let normalizedValue = 0;
                     if (point.value > 0 && maxValue > 0) {
-                        // Linear scaling: value / maxValue gives 0-1 range
                         normalizedValue = Math.min(1, point.value / maxValue);
                     }
-                    
-                    // Y position: bottom is height-10, top is 15 (leaving margins)
-                    // Higher request rate = higher on graph
-                    const y = height - 10 - (normalizedValue * (height - 25)); // 25px margin from top
-                    
+                    const y = height - 10 - (normalizedValue * (height - 25));
                     if (index === 0) {
-                        // Start path
                         pathD = `M ${x},${y}`;
                         areaD = `M ${x},${height - 10}`;
                     } else {
-                        // Continue line
                         pathD += ` L ${x},${y}`;
                     }
-                    
-                    // Track for area path
                     if (index === sortedPoints.length - 1) {
-                        // Last point - complete area path
                         areaD += ` L ${x},${y} L ${x},${height - 10}`;
                     }
                 });
-                
-                // Complete the path to right edge (current time = now)
                 if (sortedPoints.length > 0) {
                     const lastPoint = sortedPoints[sortedPoints.length - 1];
-                    const lastX = width; // Right edge = current time
-                    let lastY = height - 10; // Default to bottom (no requests)
-                    
-                    // Use the last point's value (current request rate) for smooth continuation
+                    const lastX = width;
+                    let lastY = height - 10;
                     if (lastPoint.value > 0 && maxValue > 0) {
                         const normalizedValue = Math.min(1, lastPoint.value / maxValue);
                         lastY = height - 10 - (normalizedValue * (height - 25));
                     }
-                    
-                    // Extend line to right edge (current time)
                     pathD += ` L ${lastX},${lastY}`;
-                    // Complete area path: close the shape
                     areaD += ` L ${lastX},${lastY} L ${lastX},${height - 10} Z`;
                 } else {
-                    // No points, straight line at bottom
                     pathD = `M 0,${height - 10} L ${width},${height - 10}`;
                     areaD = `M 0,${height} L ${width},${height} L ${width},${height - 10} L 0,${height - 10} Z`;
                 }
-                
-                // Update path class based on whether there are requests
                 if (requestPoints.length === 0) {
                     path.classList.add('no-requests');
                 } else {
                     path.classList.remove('no-requests');
                 }
             }
-            
             path.setAttribute('d', pathD);
             area.setAttribute('d', areaD);
         }
 
-        // Periodically update graphs (continuous smooth updates)
         setInterval(() => {
             const aggregated = aggregateMetricsByType(servicesData, requestMetricsData);
             ['auth', 'data', 'compute'].forEach(serviceType => {
                 if (aggregated[serviceType]) {
-                    // Always update graph to show current state (smooth continuous line)
                     updateGraph(serviceType, true);
                 }
             });
-        }, 500); // Update every 500ms for smooth continuous updates
+        }, 500);
 
-        // Request status on page load
         socket.on('connect', () => {
             socket.emit('request-status');
         });
