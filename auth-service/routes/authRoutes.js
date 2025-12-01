@@ -12,10 +12,15 @@ router.get('/health', (req, res) => {
   });
 });
 
-router.post('/register', authController.register);
-router.post('/login', authController.login);
-router.get('/verify', authController.verify);
 
-router.get('/profile', authController.getProfile);
+router.get('/auth-worker', authController.authWorker);
+router.post('/auth-worker', authController.authWorker);
+router.get('/auth-work', authController.authWorker);
+router.post('/auth-work', authController.authWorker);
+
+router.post('/signup', authController.register);
+
+
+router.post('/signin', authController.login);
 
 module.exports = router;

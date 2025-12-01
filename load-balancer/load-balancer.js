@@ -24,38 +24,37 @@ const colors = {
   white: '\x1b[37m'
 };
 
-
 const logger = {
   timestamp: () => {
     const now = new Date();
     return now.toISOString().replace('T', ' ').substring(0, 19);
   },
-  
+
   info: (message) => {
     console.log(`${colors.cyan}[${logger.timestamp()}]${colors.reset} ${colors.bright}ℹ${colors.reset}  ${message}`);
   },
-  
+
   success: (message) => {
     console.log(`${colors.green}[${logger.timestamp()}]${colors.reset} ${colors.bright}✓${colors.reset}  ${message}`);
   },
-  
+
   warning: (message) => {
     console.log(`${colors.yellow}[${logger.timestamp()}]${colors.reset} ${colors.bright}⚠${colors.reset}  ${message}`);
   },
-  
+
   error: (message) => {
     console.log(`${colors.red}[${logger.timestamp()}]${colors.reset} ${colors.bright}✗${colors.reset}  ${message}`);
   },
-  
+
   request: (method, path, serviceUrl, statusCode, responseTime, port = null) => {
-    const statusColor = statusCode >= 500 ? colors.red : 
-                       statusCode >= 400 ? colors.yellow : 
-                       colors.green;
-    const methodColor = method === 'GET' ? colors.blue : 
-                       method === 'POST' ? colors.green : 
-                       method === 'PUT' ? colors.yellow : 
-                       method === 'DELETE' ? colors.red : colors.white;
-    
+    const statusColor = statusCode >= 500 ? colors.red :
+      statusCode >= 400 ? colors.yellow :
+      colors.green;
+    const methodColor = method === 'GET' ? colors.blue :
+      method === 'POST' ? colors.green :
+      method === 'PUT' ? colors.yellow :
+      method === 'DELETE' ? colors.red : colors.white;
+
     const portDisplay = port ? ` ${colors.cyan}[port ${port}]${colors.reset}` : '';
     console.log(
       `${colors.dim}[${logger.timestamp()}]${colors.reset} ` +
@@ -75,14 +74,14 @@ const services = {
 };
 
 const SERVICE_HOST = process.env.SERVICE_HOST || 'localhost';
-const AUTH_PORTS = process.env.AUTH_PORTS ? 
-  process.env.AUTH_PORTS.split(',').map(p => parseInt(p.trim())) : 
+const AUTH_PORTS = process.env.AUTH_PORTS ?
+  process.env.AUTH_PORTS.split(',').map(p => parseInt(p.trim())) :
   [3001, 3002, 3003];
-const DATA_PORTS = process.env.DATA_PORTS ? 
-  process.env.DATA_PORTS.split(',').map(p => parseInt(p.trim())) : 
+const DATA_PORTS = process.env.DATA_PORTS ?
+  process.env.DATA_PORTS.split(',').map(p => parseInt(p.trim())) :
   [4002, 4003, 4004];
-const COMPUTE_PORTS = process.env.COMPUTE_PORTS ? 
-  process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) : 
+const COMPUTE_PORTS = process.env.COMPUTE_PORTS ?
+  process.env.COMPUTE_PORTS.split(',').map(p => parseInt(p.trim())) :
   [5002, 5003, 5004];
 
 function initializeStaticServices() {
@@ -113,7 +112,7 @@ async function discoverServicesFromRegistry() {
 
   try {
     const [authServices, dataServices, computeServices] = await Promise.all([
-      discoverServices('auth', true), 
+      discoverServices('auth', true),
       discoverServices('data', true),
       discoverServices('compute', true)
     ]);
@@ -146,7 +145,7 @@ async function discoverServicesFromRegistry() {
 
       const discoveredUrls = new Set(discoveredServices.map(s => s.url));
       const removedServices = existingServices.filter(s => !discoveredUrls.has(s.url));
-      
+
       removedServices.forEach(service => {
         if (service.healthy) {
           logger.warning(`[DISCOVERY] ${serviceType} service removed from registry: ${service.url}`);
@@ -177,10 +176,16 @@ const roundRobin = {
 };
 
 const requestMetrics = new Map();
+const loadBalancerMetrics = {
+  total: 0,
+  success: 0,
+  failed: 0,
+  recentRequests: []
+};
 
 const MAX_FAILURES = 5;
 const HEALTH_CHECK_INTERVAL = 10000;
-const REQUEST_TIMEOUT = 10000; 
+const REQUEST_TIMEOUT = 10000;
 
 function getNextHealthyService(serviceType) {
   const serviceList = services[serviceType];
@@ -197,14 +202,12 @@ function getNextHealthyService(serviceType) {
 }
 
 function markServiceUnhealthy(serviceType, serviceUrl) {
+
   const service = services[serviceType].find(s => s.url === serviceUrl);
   if (service) {
     service.failures++;
-    if (service.failures >= MAX_FAILURES) {
-      service.healthy = false;
-      logger.error(`Service ${colors.magenta}${serviceUrl}${colors.reset} marked as ${colors.red}UNHEALTHY${colors.reset} (${service.failures} consecutive failures)`);
-    } else {
-      logger.warning(`Service ${colors.magenta}${serviceUrl}${colors.reset} has ${colors.yellow}${service.failures}${colors.reset} failures (threshold: ${MAX_FAILURES})`);
+    if (service.failures > 100) {
+      service.failures = 0;
     }
   }
 }
@@ -227,7 +230,7 @@ async function healthCheck() {
           const wasUnhealthy = !service.healthy;
           service.healthy = true;
           service.failures = 0;
-          
+
           if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
             const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
             if (wasUnhealthy) {
@@ -237,43 +240,47 @@ async function healthCheck() {
           healthyCount++;
         }
       } catch (error) {
-        const failureThreshold = serviceType === 'compute' ? MAX_FAILURES * 2 : MAX_FAILURES;
-        
+
+        const failureThreshold = serviceType === 'compute' ? MAX_FAILURES * 3 : MAX_FAILURES * 2;
+
         service.failures++;
         if (service.failures >= failureThreshold) {
           service.healthy = false;
           unhealthyCount++;
-        }
-        if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
-          if (serviceType !== 'compute' || service.failures >= failureThreshold - 2) {
-            const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
-            logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check failed: ${error.message} (${service.failures}/${failureThreshold})`);
+          const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
+          logger.error(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} marked as ${colors.red}UNHEALTHY${colors.reset} (${service.failures} consecutive health check failures)`);
+        } else {
+          if (serviceType === 'auth' || serviceType === 'data' || serviceType === 'compute') {
+            if (service.failures % 5 === 0) {
+              const serviceTypeLabel = `${colors.blue}${serviceType.toUpperCase()}${colors.reset}`;
+              logger.warning(`${serviceTypeLabel} service ${colors.magenta}${service.url}${colors.reset} health check slow/busy: ${error.message} (${service.failures}/${failureThreshold})`);
+            }
           }
         }
       }
     }
   }
-  
+
   const authServices = services.auth || [];
   const authHealthy = authServices.filter(s => s.healthy).length;
   const authTotal = authServices.length;
-  
+
   if (authHealthy < authTotal) {
     logger.warning(`AUTH services: ${colors.green}${authHealthy}${colors.reset}/${colors.yellow}${authTotal}${colors.reset} healthy`);
   }
-  
+
   const dataServices = services.data || [];
   const dataHealthy = dataServices.filter(s => s.healthy).length;
   const dataTotal = dataServices.length;
-  
+
   if (dataHealthy < dataTotal) {
     logger.warning(`DATA services: ${colors.green}${dataHealthy}${colors.reset}/${colors.yellow}${dataTotal}${colors.reset} healthy`);
   }
-  
+
   const computeServices = services.compute || [];
   const computeHealthy = computeServices.filter(s => s.healthy).length;
   const computeTotal = computeServices.length;
-  
+
   if (computeHealthy < computeTotal) {
     logger.warning(`COMPUTE services: ${colors.green}${computeHealthy}${colors.reset}/${colors.yellow}${computeTotal}${colors.reset} healthy`);
   }
@@ -287,7 +294,7 @@ if (USE_DYNAMIC_DISCOVERY) {
 }
 
 setInterval(healthCheck, HEALTH_CHECK_INTERVAL * 2);
-healthCheck(); 
+healthCheck();
 
 async function proxyRequest(req, res, serviceType) {
   const requestStartTime = Date.now();
@@ -303,7 +310,7 @@ async function proxyRequest(req, res, serviceType) {
       const headers = { ...req.headers };
       delete headers.host;
       delete headers.connection;
-      
+
       if ((req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && req.body) {
         if (!headers['content-type']) {
           headers['content-type'] = 'application/json';
@@ -337,6 +344,7 @@ async function proxyRequest(req, res, serviceType) {
       logger.request(req.method, req.path, service.url, response.status, responseTime, port);
 
       trackRequest(service.url, response.status < 400);
+      trackLoadBalancerRequest(response.status < 400);
 
       return res.status(response.status).json(response.data);
 
@@ -344,28 +352,25 @@ async function proxyRequest(req, res, serviceType) {
       attempts++;
       const responseTime = Date.now() - requestStartTime;
 
-      if (error.config?.url) {
-        const failedUrl = new URL(error.config.url).origin;
-        markServiceUnhealthy(serviceType, failedUrl);
-      }
-
       if (attempts >= maxAttempts) {
         logger.error(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed after ${maxAttempts} attempts (${responseTime}ms)`);
-        
+
         if (error.config?.url) {
           const failedUrl = new URL(error.config.url).origin;
           trackRequest(failedUrl, false);
         }
-        
+
+        trackLoadBalancerRequest(false);
+
         return res.status(503).json({
           error: 'Service unavailable',
-          message: `Failed to reach ${serviceType} service after ${maxAttempts} attempts`,
+          message: `Failed to reach ${serviceType} service after ${maxAttempts} attempts - service may be busy`,
           timestamp: new Date().toISOString()
         });
       }
 
       logger.warning(`Request ${colors.cyan}${req.method} ${req.path}${colors.reset} failed (attempt ${attempts}/${maxAttempts}): ${error.message}`);
-      
+
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
@@ -397,8 +402,36 @@ function trackRequest(serviceUrl, isSuccess) {
   metrics.recentRequests.push(now);
 }
 
+function trackLoadBalancerRequest(isSuccess) {
+  loadBalancerMetrics.total++;
+  if (isSuccess) {
+    loadBalancerMetrics.success++;
+  } else {
+    loadBalancerMetrics.failed++;
+  }
+  const now = Date.now();
+  loadBalancerMetrics.recentRequests = loadBalancerMetrics.recentRequests.filter(
+    time => now - time < 60000
+  );
+  loadBalancerMetrics.recentRequests.push(now);
+}
+
 function getRequestMetrics() {
   const metrics = {};
+
+  metrics['load-balancer'] = {
+    name: 'load-balancer',
+    type: 'loadbalancer',
+    url: `http://localhost:${PORT}`,
+    total: loadBalancerMetrics.total,
+    success: loadBalancerMetrics.success,
+    failed: loadBalancerMetrics.failed,
+    requestsPerSecond: (loadBalancerMetrics.recentRequests.length / 60).toFixed(2),
+    successRate: loadBalancerMetrics.total > 0
+      ? ((loadBalancerMetrics.success / loadBalancerMetrics.total) * 100).toFixed(2) + '%'
+      : '0%'
+  };
+
   for (const [serviceType, serviceList] of Object.entries(services)) {
     serviceList.forEach(service => {
       const serviceMetrics = requestMetrics.get(service.url);

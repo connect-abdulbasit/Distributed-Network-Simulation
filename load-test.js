@@ -40,118 +40,124 @@ function getServiceEndpoint() {
   if (ENDPOINT !== '/health') {
     return ENDPOINT;
   }
-  if (SERVICE_TYPE === 'data') {
-    return '/api/data/health';
-  } else if (SERVICE_TYPE === 'auth') {
-    return '/api/auth/health';
-  } else if (SERVICE_TYPE === 'compute') {
-    return '/api/compute/direct';
-  } else if (SERVICE_TYPE === 'both') {
-    return (stats.total % 2 === 0) ? '/api/auth/health' : '/api/data/health';
-  } else if (SERVICE_TYPE === 'all') {
+ 
     const mod = stats.total % 3;
-    if (mod === 0) return '/api/auth/health';
-    if (mod === 1) return '/api/data/health';
-    return '/api/compute/direct';
-  }
-  return '/health';
+    if (mod === 0) return '/api/auth/auth-worker';
+    if (mod === 1) return '/api/data/data-work';
+    return '/api/compute/compute-worker';
+
 }
 
-async function makeRequest() {
+function makeRequest() {
   const startTime = Date.now();
   stats.total++;
 
-  try {
-    const actualEndpoint = getServiceEndpoint();
-    let url = `${LOAD_BALANCER_URL}${actualEndpoint}`;
-    let response;
-    const timestamp = Date.now();
-    const randomId = Math.floor(Math.random() * 1000000);
+  const actualEndpoint = getServiceEndpoint();
+  let url = `${LOAD_BALANCER_URL}${actualEndpoint}`;
+  const timestamp = Date.now();
+  const randomId = Math.floor(Math.random() * 1000000);
+  
+  // Set a shorter timeout based on expected response time
+  // Worker endpoints: auth=300ms, data=200ms, compute=350ms
+  // Add buffer for network + processing
+  let requestTimeout = 2000; // 2 seconds default
+  if (actualEndpoint.includes('auth-worker')) {
+    requestTimeout = 1000; // 1 second for auth (300ms + buffer)
+  } else if (actualEndpoint.includes('data-work')) {
+    requestTimeout = 800; // 800ms for data (200ms + buffer)
+  } else if (actualEndpoint.includes('compute-worker')) {
+    requestTimeout = 1200; // 1.2 seconds for compute (350ms + buffer)
+  }
 
-    if (actualEndpoint.includes('/api/auth/register') || actualEndpoint.includes('/api/auth/login')) {
-      response = await axios.post(url, {
-        username: `testuser${timestamp}${randomId}`,
-        email: `test${timestamp}${randomId}@example.com`,
-        password: 'test123'
-      }, {
-        timeout: 5000,
-        validateStatus: () => true
-      });
-    }
-    else if (actualEndpoint === '/health') {
-      response = await axios.get(url, {
-        timeout: 5000,
-        validateStatus: () => true
-      });
-    }
-    else if (actualEndpoint.includes('/api/data')) {
-      const urlObj = new URL(url);
-      const method = urlObj.searchParams.get('method')?.toUpperCase();
-      const pathname = urlObj.pathname;
-      const keyMatch = pathname.match(/\/api\/data\/(.+)$/);
-      const hasKey = keyMatch !== null;
-      const testKey = hasKey ? keyMatch[1] : `test-key-${timestamp}-${randomId}`;
-      if (method === 'PUT' && hasKey) {
-        url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
-        response = await axios.put(url, {
-          value: {
-            foo: 'updated-bar',
-            timestamp: timestamp,
-            updated: true
-          },
-          metadata: {
-            source: 'load-test',
-            updated: true
-          }
-        }, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else if (method === 'DELETE' && hasKey) {
-        url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
-        response = await axios.delete(url, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else if (method === 'GET' && !hasKey) {
-        response = await axios.get(url, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else if (hasKey && !method) {
-        url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
-        response = await axios.get(url, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else {
+  // Fire request immediately without waiting - track result asynchronously
+  const requestPromise = (async () => {
+    try {
+      let response;
+
+      if (actualEndpoint.includes('/api/auth/register') || actualEndpoint.includes('/api/auth/login')) {
         response = await axios.post(url, {
-          key: `test-key-${timestamp}-${randomId}`,
-          value: {
-            foo: 'bar',
-            timestamp: timestamp,
-            random: randomId
-          },
-          metadata: {
-            source: 'load-test',
-            testId: randomId
-          }
+          username: `testuser${timestamp}${randomId}`,
+          email: `test${timestamp}${randomId}@example.com`,
+          password: 'test123'
         }, {
-          timeout: 5000,
+          timeout: requestTimeout,
           validateStatus: () => true
         });
       }
-    }
-    else if (actualEndpoint.includes('/api/compute')) {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      
-      if (pathname === '/api/compute/health' || pathname.endsWith('/api/compute/health')) {
+      else if (actualEndpoint === '/health') {
         response = await axios.get(url, {
-          timeout: 5000,
+          timeout: requestTimeout,
           validateStatus: () => true
         });
-      } else if (pathname.includes('/api/compute/direct')) {
+      }
+      else if (actualEndpoint.includes('/api/data')) {
+        const urlObj = new URL(url);
+        const method = urlObj.searchParams.get('method')?.toUpperCase();
+        const pathname = urlObj.pathname;
+        const keyMatch = pathname.match(/\/api\/data\/(.+)$/);
+        const hasKey = keyMatch !== null;
+        const testKey = hasKey ? keyMatch[1] : `test-key-${timestamp}-${randomId}`;
+        if (method === 'PUT' && hasKey) {
+          url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
+          response = await axios.put(url, {
+            value: {
+              foo: 'updated-bar',
+              timestamp: timestamp,
+              updated: true
+            },
+            metadata: {
+              source: 'load-test',
+              updated: true
+            }
+          }, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else if (method === 'DELETE' && hasKey) {
+          url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
+          response = await axios.delete(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else if (method === 'GET' && !hasKey) {
+          response = await axios.get(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else if (hasKey && !method) {
+          url = `${LOAD_BALANCER_URL}/api/data/${testKey}`;
+          response = await axios.get(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else {
+          response = await axios.post(url, {
+            key: `test-key-${timestamp}-${randomId}`,
+            value: {
+              foo: 'bar',
+              timestamp: timestamp,
+              random: randomId
+            },
+            metadata: {
+              source: 'load-test',
+              testId: randomId
+            }
+          }, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        }
+      }
+      else if (actualEndpoint.includes('/api/compute')) {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        
+        if (pathname === '/api/compute/health' || pathname.endsWith('/api/compute/health')) {
+          response = await axios.get(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else if (pathname.includes('/api/compute/direct')) {
         const isLargeTask = Math.random() < 0.3;
         const operations = ['add', 'subtract', 'multiply', 'divide', 'power', 'factorial', 'fibonacci', 'primeCheck', 'sumOfSquares', 'average', 'matrixMultiply'];
         const randomOp = operations[Math.floor(Math.random() * operations.length)];
@@ -198,101 +204,102 @@ async function makeRequest() {
           operands = Array.from({ length: count }, () => Math.floor(Math.random() * 1000));
         }
         
-        const timeout = isLargeTask ? 30000 : 10000; 
-        
-        response = await axios.post(url, {
-          operation: randomOp,
-          operands: operands
-        }, {
-          timeout: timeout,
-          validateStatus: () => true
-        });
-      } else if (pathname.includes('/api/compute/job')) {
-        const isLargeJob = Math.random() < 0.3;
-        let jobData;
-        
-        if (isLargeJob) {   
-          const largeOps = ['factorial', 'fibonacci', 'matrixMultiply'];
-          const op = largeOps[Math.floor(Math.random() * largeOps.length)];
+          const timeout = isLargeTask ? 30000 : requestTimeout; 
           
-          if (op === 'factorial') {
-            jobData = {
-              operation: 'factorial',
-              operands: [150] 
-            };
-          } else if (op === 'fibonacci') {
-            jobData = {
-              operation: 'fibonacci',
-              operands: [45] 
-            };
+          response = await axios.post(url, {
+            operation: randomOp,
+            operands: operands
+          }, {
+            timeout: timeout,
+            validateStatus: () => true
+          });
+        } else if (pathname.includes('/api/compute/job')) {
+          const isLargeJob = Math.random() < 0.3;
+          let jobData;
+          
+          if (isLargeJob) {   
+            const largeOps = ['factorial', 'fibonacci', 'matrixMultiply'];
+            const op = largeOps[Math.floor(Math.random() * largeOps.length)];
+            
+            if (op === 'factorial') {
+              jobData = {
+                operation: 'factorial',
+                operands: [150] 
+              };
+            } else if (op === 'fibonacci') {
+              jobData = {
+                operation: 'fibonacci',
+                operands: [45] 
+              };
+            } else {
+              const size = 40;
+              const matrixA = Array.from({ length: size }, () => 
+                Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+              );
+              const matrixB = Array.from({ length: size }, () => 
+                Array.from({ length: size }, () => Math.floor(Math.random() * 100))
+              );
+              jobData = {
+                operation: 'matrixMultiply',
+                operands: [matrixA, matrixB]
+              };
+            }
           } else {
-            const size = 40;
-            const matrixA = Array.from({ length: size }, () => 
-              Array.from({ length: size }, () => Math.floor(Math.random() * 100))
-            );
-            const matrixB = Array.from({ length: size }, () => 
-              Array.from({ length: size }, () => Math.floor(Math.random() * 100))
-            );
             jobData = {
-              operation: 'matrixMultiply',
-              operands: [matrixA, matrixB]
+              operation: 'add',
+              operands: [1, 2, 3, 4, 5]
             };
           }
+          
+          response = await axios.post(url, {
+            type: 'computation',
+            data: jobData
+          }, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
+        } else if (pathname.includes('/api/compute/stats')) {
+          response = await axios.get(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
         } else {
-          jobData = {
-            operation: 'add',
-            operands: [1, 2, 3, 4, 5]
-          };
+          response = await axios.get(url, {
+            timeout: requestTimeout,
+            validateStatus: () => true
+          });
         }
-        
-        response = await axios.post(url, {
-          type: 'computation',
-          data: jobData
-        }, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else if (pathname.includes('/api/compute/stats')) {
+      }
+      else {
         response = await axios.get(url, {
-          timeout: 5000,
-          validateStatus: () => true
-        });
-      } else {
-        response = await axios.get(url, {
-          timeout: 5000,
+          timeout: requestTimeout,
           validateStatus: () => true
         });
       }
-    }
-    else {
-      response = await axios.get(url, {
-        timeout: 5000,
-        validateStatus: () => true
-      });
-    }
 
-    const responseTime = Date.now() - startTime;
-    stats.responseTimes.push(responseTime);
+      const responseTime = Date.now() - startTime;
+      stats.responseTimes.push(responseTime);
 
-    const statusCode = response.status;
-    stats.statusCodes[statusCode] = (stats.statusCodes[statusCode] || 0) + 1;
+      const statusCode = response.status;
+      stats.statusCodes[statusCode] = (stats.statusCodes[statusCode] || 0) + 1;
 
-    if (statusCode >= 200 && statusCode < 300) {
-      stats.success++;
-    } else if (statusCode >= 400 && statusCode < 500) {
-      stats.failed++;
-    } else {
+      if (statusCode >= 200 && statusCode < 300) {
+        stats.success++;
+      } else if (statusCode >= 400 && statusCode < 500) {
+        stats.failed++;
+      } else {
+        stats.errors++;
+      }
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      stats.responseTimes.push(responseTime);
       stats.errors++;
+      stats.statusCodes['ERROR'] = (stats.statusCodes['ERROR'] || 0) + 1;
     }
+  })();
 
-    return { success: true, statusCode, responseTime };
-  } catch (error) {
-    const responseTime = Date.now() - startTime;
-    stats.responseTimes.push(responseTime);
-    stats.errors++;
-    stats.statusCodes['ERROR'] = (stats.statusCodes['ERROR'] || 0) + 1;
-    return { success: false, error: error.message, responseTime };
-  }
+  // Don't wait for response - fire and track asynchronously
+  return requestPromise;
 }
 
 function calculateStats() {
@@ -407,10 +414,15 @@ async function runLoadTest() {
     if (nextScheduledTime >= endTime) {
       return;
     }
-    const requestPromise = makeRequest().finally(() => {
+    // Fire request immediately - no queuing, no waiting
+    const requestPromise = makeRequest();
+    pendingRequests.add(requestPromise);
+    
+    // Track completion asynchronously
+    requestPromise.finally(() => {
       pendingRequests.delete(requestPromise);
     });
-    pendingRequests.add(requestPromise);
+    
     nextScheduledTime += interval;
     const delay = Math.max(0, nextScheduledTime - Date.now());
     if (nextScheduledTime < endTime) {

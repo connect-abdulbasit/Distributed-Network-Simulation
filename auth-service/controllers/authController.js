@@ -4,10 +4,23 @@ const path = require('path');
 
 const localDb = require(path.join(__dirname, '../../shared/db/localDb'));
 
+exports.authWorker = async (req, res) => {
+  const start = Date.now();
+  while (Date.now() - start < 800) {
+
+    Math.sqrt(Math.random());
+  }
+
+  res.json({
+    message: 'Auth worker completed',
+    service: process.env.SERVICE_NAME || 'auth-service-1',
+    timestamp: new Date().toISOString()
+  });
+};
+
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
-console.log(username, email, password);
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }

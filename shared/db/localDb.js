@@ -108,6 +108,59 @@ class LocalDB {
       this.db = new this.SQL.Database();
     }
     this.db.run(TABLE_DEFINITIONS);
+    await this.initializeDefaultData();
+  }
+
+  async initializeDefaultData() {
+    try {
+      const existingData = await this.runQuery('SELECT COUNT(*) as count FROM data_items');
+      const count = existingData[0]?.count || 0;
+      
+      if (count === 0) {
+        console.log('[LocalDB] Initializing default data items...');
+        const defaultData = [];
+        for (let i = 1; i <= 10; i++) {
+          defaultData.push({
+            id: `data-${i}`,
+            key: `default-key-${i}`,
+            value: {
+              title: `Data Item ${i}`,
+              description: `This is default data item number ${i}`,
+              number: i,
+              active: i % 2 === 0
+            },
+            metadata: {
+              category: i <= 5 ? 'category-a' : 'category-b',
+              priority: i <= 3 ? 'high' : i <= 7 ? 'medium' : 'low',
+              created: 'system'
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+        }
+        
+        // Use withWrite to ensure data is persisted
+        await this.withWrite(async (db) => {
+          for (const item of defaultData) {
+            db.run(
+              `INSERT INTO data_items (id, data_key, value_json, metadata_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [
+                item.id,
+                item.key,
+                JSON.stringify(item.value),
+                JSON.stringify(item.metadata),
+                item.createdAt,
+                item.updatedAt
+              ]
+            );
+          }
+        });
+        console.log('[LocalDB] Default data items initialized successfully');
+      }
+    } catch (error) {
+      console.error('[LocalDB] Error initializing default data:', error);
+    }
   }
 
   async persist() {
@@ -278,6 +331,14 @@ class LocalDB {
     const row = await this.runGet(
       'SELECT * FROM data_items WHERE data_key = ?',
       [key]
+    );
+    return mapDataItem(row);
+  }
+
+  async getDataItemById(id) {
+    const row = await this.runGet(
+      'SELECT * FROM data_items WHERE id = ?',
+      [id]
     );
     return mapDataItem(row);
   }

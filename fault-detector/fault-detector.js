@@ -438,6 +438,26 @@ function getRequestMetrics() {
       };
     }
   }
+  
+  // Ensure load balancer metrics are included if they exist
+  const lbUrl = LOAD_BALANCER_URL || 'http://localhost:3000';
+  const lbMetrics = requestMetrics.get(lbUrl);
+  if (lbMetrics) {
+    metrics[lbUrl] = {
+      name: 'load-balancer',
+      type: 'loadbalancer',
+      url: lbUrl,
+      total: lbMetrics.total,
+      success: lbMetrics.success,
+      failed: lbMetrics.failed,
+      requestsPerSecond: lbMetrics.requestsPerSecond.toFixed(2),
+      lastRequest: lbMetrics.lastRequest,
+      successRate: lbMetrics.total > 0 
+        ? ((lbMetrics.success / lbMetrics.total) * 100).toFixed(2) + '%'
+        : '0%'
+    };
+  }
+  
   return metrics;
 }
 
@@ -460,6 +480,43 @@ async function fetchRequestMetricsFromLoadBalancer() {
     
     if (response.data && response.data.metrics) {
       for (const [url, metrics] of Object.entries(response.data.metrics)) {
+        // Handle load balancer metrics separately
+        if (metrics.type === 'loadbalancer' || url === 'load-balancer') {
+          const lbUrl = metrics.url || 'http://localhost:3000';
+          if (!requestMetrics.has(lbUrl)) {
+            requestMetrics.set(lbUrl, createMetricsEntry());
+            serviceHealth.set(lbUrl, createHealthEntry('load-balancer', 'loadbalancer', lbUrl, false));
+          }
+          const existingMetrics = requestMetrics.get(lbUrl);
+          const prev = previousMetrics[url] || { total: 0, success: 0, failed: 0 };
+          
+          // Track failed requests
+          if (metrics.failed > prev.failed) {
+            const newFailures = metrics.failed - prev.failed;
+            for (let i = 0; i < newFailures; i++) {
+              emitWebSocketEvent('request-event', {
+                type: 'request',
+                service: {
+                  name: 'load-balancer',
+                  url: lbUrl,
+                  type: 'loadbalancer'
+                },
+                status: 'failed',
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+          
+          existingMetrics.total = metrics.total;
+          existingMetrics.success = metrics.success;
+          existingMetrics.failed = metrics.failed;
+          existingMetrics.lastRequest = new Date().toISOString();
+          existingMetrics.requestsPerSecond = parseFloat(metrics.requestsPerSecond);
+          updateRequestRate(lbUrl);
+          continue;
+        }
+        
+        // Handle service metrics
         for (const [serviceUrl, health] of serviceHealth.entries()) {
           const servicePort = new URL(serviceUrl).port;
           const metricsPort = new URL(metrics.url).port;

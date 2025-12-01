@@ -108,6 +108,68 @@
             color: #f59e0b;
         }
 
+        .request-distribution {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .request-distribution h2 {
+            font-size: 20px;
+            margin-bottom: 20px;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .distribution-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .distribution-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .distribution-item-label {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .distribution-item-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .distribution-item-percentage {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .distribution-item.auth .distribution-item-value {
+            color: #10b981;
+        }
+
+        .distribution-item.data .distribution-item-value {
+            color: #3b82f6;
+        }
+
+        .distribution-item.compute .distribution-item-value {
+            color: #f59e0b;
+        }
+
         .service-groups {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
@@ -303,6 +365,9 @@
     <div class="summary" id="summary">
     </div>
 
+    <div class="request-distribution" id="requestDistribution">
+    </div>
+
     <div class="service-groups" id="serviceGroups">
     </div>
 
@@ -315,6 +380,7 @@
         const statusIndicator = document.getElementById('statusIndicator');
         const connectionText = document.getElementById('connectionText');
         const summaryContainer = document.getElementById('summary');
+        const requestDistributionContainer = document.getElementById('requestDistribution');
         const serviceGroupsContainer = document.getElementById('serviceGroups');
 
         let servicesData = {};
@@ -345,6 +411,7 @@
             servicesData = data.services || {};
             requestMetricsData = data.requestMetrics || {};
             updateSummary(data.summary);
+            updateRequestDistribution(servicesData, requestMetricsData);
             updateServiceGroups(servicesData, requestMetricsData);
         });
 
@@ -352,6 +419,7 @@
             if (data.summary) updateSummary(data.summary);
             if (data.services) servicesData = data.services;
             if (data.requestMetrics) requestMetricsData = data.requestMetrics;
+            updateRequestDistribution(servicesData, requestMetricsData);
             updateServiceGroups(servicesData, requestMetricsData);
         });
 
@@ -368,6 +436,7 @@
                         }
                     }
                 });
+                updateRequestDistribution(servicesData, requestMetricsData);
                 updateServiceGroups(servicesData, requestMetricsData);
             }
         });
@@ -453,8 +522,13 @@
 
         function updateSummary(summary) {
             if (!summary) return;
-            const totalFailed = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.failed || 0), 0);
-            const totalRequests = Object.values(requestMetricsData).reduce((sum, m) => sum + (m.total || 0), 0);
+            // Include all metrics including load balancer
+            const totalFailed = Object.values(requestMetricsData).reduce((sum, m) => {
+                return sum + (m.failed || 0);
+            }, 0);
+            const totalRequests = Object.values(requestMetricsData).reduce((sum, m) => {
+                return sum + (m.total || 0);
+            }, 0);
             summaryContainer.innerHTML = `
                 <div class="summary-card total">
                     <h3>Total Services</h3>
@@ -489,6 +563,48 @@
             const total = allMetrics.reduce((sum, m) => sum + (m.total || 0), 0);
             const success = allMetrics.reduce((sum, m) => sum + (m.success || 0), 0);
             return total > 0 ? ((success / total) * 100).toFixed(1) : '0';
+        }
+
+        function updateRequestDistribution(services, metrics) {
+            const aggregated = aggregateMetricsByType(services, metrics);
+            const totalRequests = aggregated.auth.total + aggregated.data.total + aggregated.compute.total;
+            
+            const distribution = [
+                {
+                    type: 'auth',
+                    label: 'Auth Service',
+                    total: aggregated.auth.total,
+                    percentage: totalRequests > 0 ? ((aggregated.auth.total / totalRequests) * 100).toFixed(1) : '0.0'
+                },
+                {
+                    type: 'data',
+                    label: 'Data Service',
+                    total: aggregated.data.total,
+                    percentage: totalRequests > 0 ? ((aggregated.data.total / totalRequests) * 100).toFixed(1) : '0.0'
+                },
+                {
+                    type: 'compute',
+                    label: 'Compute Service',
+                    total: aggregated.compute.total,
+                    percentage: totalRequests > 0 ? ((aggregated.compute.total / totalRequests) * 100).toFixed(1) : '0.0'
+                }
+            ];
+
+            let html = '<h2>Request Distribution</h2>';
+            html += '<div class="distribution-list">';
+            
+            distribution.forEach(item => {
+                html += `
+                    <div class="distribution-item ${item.type}">
+                        <div class="distribution-item-label">${item.label}</div>
+                        <div class="distribution-item-value">${item.total}</div>
+                        <div class="distribution-item-percentage">${item.percentage}% of total</div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            requestDistributionContainer.innerHTML = html;
         }
 
         function updateServiceGroups(services, metrics) {

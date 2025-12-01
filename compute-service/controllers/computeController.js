@@ -89,67 +89,15 @@ exports.computeDirect = async (req, res) => {
   }
 };
 
-exports.submitJob = async (req, res) => {
-  try {
-    const { type, data } = req.body;
+exports.computeWorker = async (req, res) => {
+  const start = Date.now();
+  while (Date.now() - start < 550) {
 
-    if (!type || !data) {
-      return res.status(400).json({ error: 'Type and data are required' });
-    }
-
-    const job = await jobQueue.add({
-      type,
-      data,
-      submittedAt: new Date().toISOString(),
-      service: process.env.SERVICE_NAME || 'compute-service-1'
-    });
-
-    res.status(202).json({
-      message: 'Job submitted successfully',
-      jobId: job.id,
-      status: 'pending'
-    });
-  } catch (error) {
-    console.error('Job submission error:', error);
-    res.status(500).json({ error: 'Failed to submit job' });
+    Math.sqrt(Math.random());
   }
+  res.json({
+    message: 'Compute worker completed',
+    service: process.env.SERVICE_NAME || 'compute-service-1',
+    timestamp: new Date().toISOString()
+  });
 };
-
-exports.getJobStatus = async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const job = await jobQueue.getJob(jobId);
-
-    if (!job) {
-      return res.status(404).json({ error: 'Job not found' });
-    }
-
-    const state = await job.getState();
-    const progress = job.progress();
-
-    res.json({
-      jobId: job.id,
-      status: state,
-      progress,
-      data: job.data,
-      result: job.returnvalue
-    });
-  } catch (error) {
-    console.error('Get job error:', error);
-    res.status(500).json({ error: 'Failed to retrieve job' });
-  }
-};
-
-exports.getStats = async (req, res) => {
-  try {
-    const counts = await jobQueue.getJobCounts();
-    res.json({
-      service: process.env.SERVICE_NAME || 'compute-service-1',
-      queue: counts
-    });
-  } catch (error) {
-    console.error('Stats error:', error);
-    res.status(500).json({ error: 'Failed to retrieve stats' });
-  }
-};
-

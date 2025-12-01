@@ -12,12 +12,12 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Worker endpoint - accepts both GET and POST
+router.get('/compute-worker', computeController.computeWorker);
+router.post('/compute-worker', computeController.computeWorker);
+
 router.post('/direct', computeController.computeDirect);
 
-router.post('/job', computeController.submitJob);
-router.get('/job/:jobId', computeController.getJobStatus);
-
-router.get('/stats', computeController.getStats);
 
 module.exports = router;
 

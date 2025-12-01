@@ -12,10 +12,10 @@ router.get('/health', (req, res) => {
   });
 });
 
-router.post('/', dataController.createData);
-router.get('/', dataController.getAllData);
-router.get('/:key', dataController.getData);
-router.put('/:key', dataController.updateData);
-router.delete('/:key', dataController.deleteData);
+// Worker endpoint - accepts both GET and POST
+router.get('/data-work', dataController.dataWorker);
+router.post('/data-work', dataController.dataWorker);
+
+router.get('/:id', dataController.getDataById);
 
 module.exports = router;
