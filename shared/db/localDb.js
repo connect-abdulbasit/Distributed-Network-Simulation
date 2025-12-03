@@ -139,7 +139,6 @@ class LocalDB {
           });
         }
         
-        // Use withWrite to ensure data is persisted
         await this.withWrite(async (db) => {
           for (const item of defaultData) {
             db.run(

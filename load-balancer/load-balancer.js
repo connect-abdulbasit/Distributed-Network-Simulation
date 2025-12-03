@@ -156,20 +156,45 @@ async function discoverServicesFromRegistry() {
       return [...newServices, ...removedServices];
     };
 
+    const prevAuthCount = services.auth.filter(s => s.healthy).length;
+    const prevDataCount = services.data.filter(s => s.healthy).length;
+    const prevComputeCount = services.compute.filter(s => s.healthy).length;
+
     services.auth = updateServiceList('auth', authServices);
     services.data = updateServiceList('data', dataServices);
     services.compute = updateServiceList('compute', computeServices);
+
+    const newAuthCount = services.auth.filter(s => s.healthy).length;
+    const newDataCount = services.data.filter(s => s.healthy).length;
+    const newComputeCount = services.compute.filter(s => s.healthy).length;
+
+    if (prevAuthCount > 0 && Math.abs(newAuthCount - prevAuthCount) > prevAuthCount * 0.5) {
+      resetRoundRobinCounter('auth');
+    }
+    if (prevDataCount > 0 && Math.abs(newDataCount - prevDataCount) > prevDataCount * 0.5) {
+      resetRoundRobinCounter('data');
+    }
+    if (prevComputeCount > 0 && Math.abs(newComputeCount - prevComputeCount) > prevComputeCount * 0.5) {
+      resetRoundRobinCounter('compute');
+    }
 
   } catch (error) {
     logger.warning(`[DISCOVERY] Failed to discover services: ${error.message}`);
     if (services.auth.length === 0 && services.data.length === 0 && services.compute.length === 0) {
       logger.info('[DISCOVERY] Falling back to static service configuration');
       initializeStaticServices();
+      resetAllRoundRobinCounters();
     }
   }
 }
 
 const roundRobin = {
+  auth: 0,
+  data: 0,
+  compute: 0
+};
+
+const previousServiceCounts = {
   auth: 0,
   data: 0,
   compute: 0
@@ -200,10 +225,46 @@ function getNextHealthyService(serviceType) {
     throw new Error(`No healthy ${serviceType} services available`);
   }
 
-  const index = roundRobin[serviceType] % healthyServices.length;
+  const currentHealthyCount = healthyServices.length;
+  const previousCount = previousServiceCounts[serviceType];
+  
+  if (previousCount > 0 && currentHealthyCount !== previousCount) {
+    if (currentHealthyCount < previousCount * 0.5) {
+      logger.info(`[ROUND-ROBIN] ${serviceType.toUpperCase()} service count changed (${previousCount} → ${currentHealthyCount}), resetting counter`);
+      roundRobin[serviceType] = 0;
+    } else if (roundRobin[serviceType] >= currentHealthyCount) {
+      roundRobin[serviceType] = roundRobin[serviceType] % currentHealthyCount;
+    }
+  }
+  
+  previousServiceCounts[serviceType] = currentHealthyCount;
+
+  const index = roundRobin[serviceType] % currentHealthyCount;
+  const selectedService = healthyServices[index];
+  
   roundRobin[serviceType]++;
 
-  return healthyServices[index];
+  if (roundRobin[serviceType] % 100 === 0) {
+    logger.info(`[ROUND-ROBIN] ${serviceType.toUpperCase()}: Request #${roundRobin[serviceType]}, Selected service ${index + 1}/${currentHealthyCount} (${selectedService.url})`);
+  }
+
+  return selectedService;
+}
+
+function resetRoundRobinCounter(serviceType) {
+  if (roundRobin.hasOwnProperty(serviceType)) {
+    roundRobin[serviceType] = 0;
+    previousServiceCounts[serviceType] = 0;
+    logger.info(`[ROUND-ROBIN] Counter reset for ${serviceType.toUpperCase()}`);
+  }
+}
+
+function resetAllRoundRobinCounters() {
+  Object.keys(roundRobin).forEach(serviceType => {
+    roundRobin[serviceType] = 0;
+    previousServiceCounts[serviceType] = 0;
+  });
+  logger.info('[ROUND-ROBIN] All counters reset');
 }
 
 function markServiceUnhealthy(serviceType, serviceUrl) {
@@ -508,12 +569,57 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/status', (req, res) => {
+  const roundRobinStats = {};
+  for (const [serviceType, counter] of Object.entries(roundRobin)) {
+    const healthyServices = services[serviceType].filter(s => s.healthy);
+    const healthyCount = healthyServices.length;
+    const currentIndex = healthyCount > 0 ? counter % healthyCount : 0;
+    
+    roundRobinStats[serviceType] = {
+      counter: counter,
+      healthyServiceCount: healthyCount,
+      currentIndex: currentIndex,
+      nextService: healthyCount > 0 ? healthyServices[currentIndex]?.url : null,
+      algorithm: 'Round-Robin'
+    };
+  }
+
   res.json({
     services,
-    roundRobin,
+    roundRobin: {
+      counters: roundRobin,
+      stats: roundRobinStats
+    },
     requestMetrics: getRequestMetrics(),
     timestamp: new Date().toISOString()
   });
+});
+
+app.post('/api/round-robin/reset', (req, res) => {
+  const { serviceType } = req.body;
+  
+  if (serviceType) {
+    if (['auth', 'data', 'compute'].includes(serviceType)) {
+      resetRoundRobinCounter(serviceType);
+      res.json({
+        success: true,
+        message: `Round-robin counter reset for ${serviceType}`,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(400).json({
+        error: 'Invalid service type',
+        message: 'Service type must be one of: auth, data, compute'
+      });
+    }
+  } else {
+    resetAllRoundRobinCounters();
+    res.json({
+      success: true,
+      message: 'All round-robin counters reset',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 app.get('/api/metrics', (req, res) => {

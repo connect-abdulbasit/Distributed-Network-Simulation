@@ -439,7 +439,6 @@ function getRequestMetrics() {
     }
   }
   
-  // Ensure load balancer metrics are included if they exist
   const lbUrl = LOAD_BALANCER_URL || 'http://localhost:3000';
   const lbMetrics = requestMetrics.get(lbUrl);
   if (lbMetrics) {
@@ -480,7 +479,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
     
     if (response.data && response.data.metrics) {
       for (const [url, metrics] of Object.entries(response.data.metrics)) {
-        // Handle load balancer metrics separately
         if (metrics.type === 'loadbalancer' || url === 'load-balancer') {
           const lbUrl = metrics.url || 'http://localhost:3000';
           if (!requestMetrics.has(lbUrl)) {
@@ -496,7 +494,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
             ['auth', 'data', 'compute'].forEach(serviceType => {
               const newFailures = (metrics.failuresByServiceType[serviceType] || 0) - (prevFailures[serviceType] || 0);
               if (newFailures > 0) {
-                // Find the first service of this type to avoid double counting
                 let firstServiceUrl = null;
                 for (const [serviceUrl, health] of serviceHealth.entries()) {
                   if (health.type === serviceType) {
@@ -511,7 +508,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
                   if (serviceMetrics) {
                     serviceMetrics.failed += newFailures;
                     serviceMetrics.total += newFailures;
-                    // Emit failed request events for this service type
                     for (let i = 0; i < newFailures; i++) {
                       emitWebSocketEvent('request-event', {
                         type: 'request',
@@ -530,7 +526,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
             });
           }
           
-          // Track general load balancer failures
           if (metrics.failed > prev.failed) {
             const newFailures = metrics.failed - prev.failed;
             for (let i = 0; i < newFailures; i++) {
@@ -556,7 +551,6 @@ async function fetchRequestMetricsFromLoadBalancer() {
           continue;
         }
         
-        // Handle service metrics
         for (const [serviceUrl, health] of serviceHealth.entries()) {
           const servicePort = new URL(serviceUrl).port;
           const metricsPort = new URL(metrics.url).port;

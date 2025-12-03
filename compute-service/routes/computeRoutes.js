@@ -12,7 +12,6 @@ router.get('/health', (req, res) => {
   });
 });
 
-// Worker endpoint - accepts both GET and POST
 router.get('/compute-worker', computeController.computeWorker);
 router.post('/compute-worker', computeController.computeWorker);
 

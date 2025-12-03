@@ -57,19 +57,14 @@ function makeRequest() {
   const timestamp = Date.now();
   const randomId = Math.floor(Math.random() * 1000000);
   
-  // Set a shorter timeout based on expected response time
-  // Worker endpoints: auth=300ms, data=200ms, compute=350ms
-  // Add buffer for network + processing
-  let requestTimeout = 2000; // 2 seconds default
+  let requestTimeout = 2000;
   if (actualEndpoint.includes('auth-worker')) {
-    requestTimeout = 1000; // 1 second for auth (300ms + buffer)
+    requestTimeout = 1000;
   } else if (actualEndpoint.includes('data-work')) {
-    requestTimeout = 800; // 800ms for data (200ms + buffer)
+    requestTimeout = 800;
   } else if (actualEndpoint.includes('compute-worker')) {
-    requestTimeout = 1200; // 1.2 seconds for compute (350ms + buffer)
+    requestTimeout = 1200;
   }
-
-  // Fire request immediately without waiting - track result asynchronously
   const requestPromise = (async () => {
     try {
       let response;
@@ -298,7 +293,6 @@ function makeRequest() {
     }
   })();
 
-  // Don't wait for response - fire and track asynchronously
   return requestPromise;
 }
 
@@ -414,11 +408,9 @@ async function runLoadTest() {
     if (nextScheduledTime >= endTime) {
       return;
     }
-    // Fire request immediately - no queuing, no waiting
     const requestPromise = makeRequest();
     pendingRequests.add(requestPromise);
     
-    // Track completion asynchronously
     requestPromise.finally(() => {
       pendingRequests.delete(requestPromise);
     });
