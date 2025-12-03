@@ -113,11 +113,11 @@ async function syncServicesFromRegistry() {
   }
 
   const registryServices = await fetchServicesFromRegistry();
-  if (!registryServices) {
+  if (!registryServices || registryServices.length === 0) {
     return;
   }
 
-  const activeUrls = new Set();
+  const registryUrls = new Set();
 
   registryServices.forEach(service => {
     const serviceType = service.serviceType || service.type;
@@ -126,7 +126,7 @@ async function syncServicesFromRegistry() {
     }
 
     const normalizedUrl = getServiceUrl(service.url, serviceType);
-    activeUrls.add(normalizedUrl);
+    registryUrls.add(normalizedUrl);
 
     ensureServiceTracked({
       name: service.name || service.serviceId || `${serviceType}-${normalizedUrl}`,
@@ -136,25 +136,49 @@ async function syncServicesFromRegistry() {
     });
   });
 
+  const servicesToRemove = [];
   for (const [url, health] of serviceHealth.entries()) {
-    if (health.registryManaged && !activeUrls.has(url)) {
-      console.log(`[FAULT DETECTOR] Removing service ${health.name} (${url}) - no longer in registry`);
-      serviceHealth.delete(url);
-      requestMetrics.delete(url);
+    if (!registryUrls.has(url)) {
+      servicesToRemove.push({ url, health });
     }
   }
+
+  servicesToRemove.forEach(({ url, health }) => {
+    if (health.registryManaged) {
+      console.log(`[FAULT DETECTOR] Removing service ${health.name} (${url}) - no longer in registry`);
+    } else {
+      console.log(`[FAULT DETECTOR] Removing static service ${health.name} (${url}) - not found in registry`);
+    }
+    serviceHealth.delete(url);
+    requestMetrics.delete(url);
+  });
 }
 
 async function initializeHealthTracking() {
-  loadStaticServices();
   if (USE_SERVICE_REGISTRY) {
     await syncServicesFromRegistry();
+    if (serviceHealth.size === 0) {
+      console.log('[FAULT DETECTOR] No services found in registry, loading static services as fallback');
+      loadStaticServices();
+    } else {
+      const loadBalancerUrl = getServiceUrl('http://localhost:3000', 'loadbalancer');
+      if (!serviceHealth.has(loadBalancerUrl)) {
+        ensureServiceTracked({
+          name: 'load-balancer',
+          type: 'loadbalancer',
+          url: 'http://localhost:3000',
+          registryManaged: false
+        });
+      }
+    }
+  } else {
+    loadStaticServices();
   }
   console.log(`[FAULT DETECTOR] Monitoring ${serviceHealth.size} services`);
   if (IS_LOCAL) {
     console.log(`[FAULT DETECTOR] Running in LOCAL mode (using localhost)`);
     Array.from(serviceHealth.values()).forEach(health => {
-      console.log(`  - ${health.name}: ${health.url}`);
+      console.log(`  - ${health.name}: ${health.url} ${health.registryManaged ? '(registry)' : '(static)'}`);
     });
   } else {
     console.log(`[FAULT DETECTOR] Running in DOCKER mode (using ${SERVICE_HOST})`);
@@ -279,7 +303,18 @@ async function checkServiceHealth(serviceUrl) {
 }
 
 async function checkAllServices() {
-  await syncServicesFromRegistry();
+  if (USE_SERVICE_REGISTRY) {
+    await syncServicesFromRegistry();
+    const loadBalancerUrl = getServiceUrl('http://localhost:3000', 'loadbalancer');
+    if (!serviceHealth.has(loadBalancerUrl)) {
+      ensureServiceTracked({
+        name: 'load-balancer',
+        type: 'loadbalancer',
+        url: 'http://localhost:3000',
+        registryManaged: false
+      });
+    }
+  }
   logger.log('Running health checks on all services...');
 
   const checks = Array.from(serviceHealth.keys()).map(url => 
