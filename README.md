@@ -2,14 +2,148 @@
 
 A distributed microservices system demonstrating load balancing, fault tolerance, dynamic service discovery, and shared data persistence using local SQLite database.
 
+## 🚀 Quick Reference
+
+**Prerequisites:** Node.js 14+, npm 6+, Bash shell
+
+**Quick Start:**
+```bash
+# Install dependencies
+npm install --prefix shared auth-service data-service compute-service load-balancer fault-detector service-registry
+
+# Start with 3 instances (recommended)
+chmod +x start-3-instances.sh && ./start-3-instances.sh
+
+# Or start with 10 instances (load testing)
+chmod +x start-10-instances.sh && ./start-10-instances.sh
+```
+
+**Access Points:**
+- Load Balancer: http://localhost:3000
+- Dashboard: http://localhost:3004
+- Service Registry: http://localhost:3005
+
+**Stop Services:** Press `Ctrl+C` in the terminal running the script
+
+---
+
+## 📋 Environment Requirements
+
+### System Requirements
+
+- **Operating System**: macOS, Linux, or Windows (with WSL/Git Bash)
+- **Node.js**: Version 14.x or higher (recommended: 16.x or 18.x)
+- **npm**: Version 6.x or higher (comes with Node.js)
+- **Bash**: Required for running startup scripts (macOS/Linux have it by default, Windows needs Git Bash or WSL)
+- **Ports**: Multiple ports must be available (see Port Configuration section)
+
+### Verify Your Environment
+
+```bash
+# Check Node.js version
+node --version  # Should be v14.x or higher
+
+# Check npm version
+npm --version   # Should be 6.x or higher
+
+# Check if bash is available
+bash --version
+```
+
+### Required Ports
+
+The system uses the following ports:
+
+**Core Services (Always Required):**
+- `3000`: Load Balancer
+- `3004`: Fault Detector & Dashboard
+- `3005`: Service Registry
+
+**Service Instances - 3 Instances Mode:**
+- `3001-3003`: Auth Service instances (3 ports)
+- `4002-4004`: Data Service instances (3 ports)
+- `5002-5004`: Compute Service instances (3 ports)
+- **Total: 12 ports for service instances**
+
+**Service Instances - 10 Instances Mode:**
+- `3001-3010`: Auth Service instances (10 ports)
+- `4002-4011`: Data Service instances (10 ports)
+- `5002-5011`: Compute Service instances (10 ports)
+- **Total: 30 ports for service instances**
+
+**Total Ports Required:**
+- **3 instances mode**: 15 ports (3 core + 12 service instances)
+- **10 instances mode**: 33 ports (3 core + 30 service instances)
+
+**Checking Available Ports:**
+```bash
+# Check if a specific port is in use
+lsof -i :3001
+
+# Check multiple ports
+for port in 3000 3004 3005 3001 3002 3003; do
+  echo "Port $port:"
+  lsof -i :$port || echo "  Available"
+done
+```
+
+**Freeing Up Ports:**
+The startup scripts automatically kill processes using required ports. To manually free a port:
+```bash
+# Find and kill process using port 3001
+lsof -ti:3001 | xargs kill -9
+```
+
+### Environment Variables
+
+The following environment variables can be set (all are optional with defaults):
+
+**Global:**
+- `SERVICE_HOST`: Service hostname (default: `localhost`)
+- `SERVICE_REGISTRY_URL`: Service registry URL (default: `http://localhost:3005`)
+- `USE_SERVICE_REGISTRY`: Enable service registry (default: `true`)
+- `USE_DYNAMIC_DISCOVERY`: Enable dynamic discovery (default: `true`)
+
+**Auth Service:**
+- `PORT`: Service port (required, no default)
+- `SERVICE_NAME`: Service instance name (required, e.g., `auth-service-1`)
+- `JWT_SECRET`: JWT signing secret (default: `'your-secret-key-change-in-production'`)
+  - **Critical**: All auth instances MUST use the same `JWT_SECRET`
+- `JWT_EXPIRY`: Token expiration (default: `24h`)
+
+**Data Service:**
+- `PORT`: Service port (required, no default)
+- `SERVICE_NAME`: Service instance name (required, e.g., `data-service-1`)
+
+**Compute Service:**
+- `PORT`: Service port (required, no default)
+- `SERVICE_NAME`: Service instance name (required, e.g., `compute-service-1`)
+- `REDIS_HOST`: Redis host for job queue (default: `localhost`)
+- `REDIS_PORT`: Redis port (default: `6379`)
+
+**Load Balancer:**
+- `PORT`: Load balancer port (default: `3000`)
+
+**Service Registry:**
+- `PORT`: Registry port (default: `3005`)
+
+**Fault Detector:**
+- `PORT`: Fault detector port (default: `3004`)
+
 ## Architecture
 
 The system consists of multiple microservices with load balancing and fault detection:
 
 - **Service Registry** (Port 3005): Central service discovery and registration system
-- **Auth Service** (3 instances on ports 3001-3003): User authentication and JWT token management
-- **Data Service** (3 instances on ports 4002-4004): CRUD operations for data items
-- **Compute Service** (3 instances on ports 5002-5004): Heavy computation tasks and job queue
+- **Auth Service** (3 or 10 instances): User authentication and JWT token management
+  - 3 instances: Ports 3001-3003
+  - 10 instances: Ports 3001-3010
+- **Data Service** (3 or 10 instances): CRUD operations for data items
+  - 3 instances: Ports 4002-4004
+  - 10 instances: Ports 4002-4011
+- **Compute Service** (3 or 10 instances): Heavy computation tasks and job queue
+  - 3 instances: Ports 5002-5004
+  - 10 instances: Ports 5002-5011
 - **Load Balancer** (Port 3000): Routes requests across multiple service instances using round-robin and health-based routing
 - **Fault Detector** (Port 3004): Monitors service health, sends alerts, and provides real-time dashboard
 - **Shared Local Database**: SQLite database (`data/local-db.sqlite`) shared across all services
@@ -22,6 +156,8 @@ All services automatically register with the Service Registry on startup and sen
 
 ### 1. Install Dependencies
 
+Install dependencies for all services:
+
 ```bash
 npm install --prefix shared
 npm install --prefix auth-service
@@ -32,16 +168,26 @@ npm install --prefix fault-detector
 npm install --prefix service-registry
 ```
 
-### 2. Start All Services (Recommended)
-
-Use the automated startup script to start all services with proper orchestration:
-
+**Or install all at once:**
 ```bash
-chmod +x start-with-load-balancer.sh
-./start-with-load-balancer.sh
+for dir in shared auth-service data-service compute-service load-balancer fault-detector service-registry; do
+  echo "Installing dependencies for $dir..."
+  npm install --prefix $dir
+done
 ```
 
-This script will:
+### 2. Start All Services
+
+Choose between two startup scripts based on your needs:
+
+#### Option A: Start with 3 Instances (Recommended for Development)
+
+```bash
+chmod +x start-3-instances.sh
+./start-3-instances.sh
+```
+
+**This script will:**
 - Clear any processes using required ports
 - Start the Service Registry (port 3005)
 - Start 3 instances of Auth Service (ports 3001-3003)
@@ -49,6 +195,28 @@ This script will:
 - Start 3 instances of Compute Service (ports 5002-5004)
 - Start the Load Balancer (port 3000)
 - Start the Fault Detector with dashboard (port 3004)
+
+**Total Services:** 10 (1 registry + 9 service instances + 1 load balancer + 1 fault detector)
+
+#### Option B: Start with 10 Instances (For Load Testing)
+
+```bash
+chmod +x start-10-instances.sh
+./start-10-instances.sh
+```
+
+**This script will:**
+- Clear any processes using required ports
+- Start the Service Registry (port 3005)
+- Start 10 instances of Auth Service (ports 3001-3010)
+- Start 10 instances of Data Service (ports 4002-4011)
+- Start 10 instances of Compute Service (ports 5002-5011)
+- Start the Load Balancer (port 3000)
+- Start the Fault Detector with dashboard (port 3004)
+
+**Total Services:** 33 (1 registry + 30 service instances + 1 load balancer + 1 fault detector)
+
+**Note:** Make sure you have enough available ports before running the 10-instance script.
 
 **Press Ctrl+C to stop all services gracefully.**
 
@@ -200,25 +368,47 @@ curl http://localhost:3004/health
 
 ---
 
-### **Using the Automated Script (Recommended)**
+### **Using the Automated Scripts (Recommended)**
 
-The `start-with-load-balancer.sh` script handles all of this automatically:
+Two automated scripts are available:
+
+#### **3 Instances Script** (`start-3-instances.sh`)
 
 ```bash
-./start-with-load-balancer.sh
+./start-3-instances.sh
 ```
 
 **What it does:**
 1. ✅ Kills any processes on required ports
 2. ✅ Starts Service Registry (waits 3s)
-3. ✅ Starts Auth services (waits 2s between each)
-4. ✅ Starts Data services (waits 2s between each)
-5. ✅ Starts Compute services (waits 2s between each)
+3. ✅ Starts 3 Auth service instances (waits 1s between each)
+4. ✅ Starts 3 Data service instances (waits 1s between each)
+5. ✅ Starts 3 Compute service instances (waits 1s between each)
+6. ✅ Waits 3s for services to register
+7. ✅ Starts Load Balancer (waits 2s)
+8. ✅ Starts Fault Detector
+
+**Total startup time:** ~15-20 seconds
+
+#### **10 Instances Script** (`start-10-instances.sh`)
+
+```bash
+./start-10-instances.sh
+```
+
+**What it does:**
+1. ✅ Kills any processes on required ports
+2. ✅ Starts Service Registry (waits 3s)
+3. ✅ Starts 10 Auth service instances (waits 1s between each)
+4. ✅ Starts 10 Data service instances (waits 1s between each)
+5. ✅ Starts 10 Compute service instances (waits 1s between each)
 6. ✅ Waits 3s for services to register
 7. ✅ Starts Load Balancer (waits 2s)
 8. ✅ Starts Fault Detector
 
 **Total startup time:** ~30-40 seconds
+
+**Note:** The 10-instance script requires 33 ports to be available. Make sure no other services are using ports 3001-3010, 4002-4011, and 5002-5011.
 
 ---
 
@@ -784,59 +974,165 @@ rm data/local-db.sqlite
 
 ---
 
-## Environment Variables
+## Environment Variables Reference
+
+### Global Configuration
+
+These can be set in your shell environment or `.env` files:
+
+```bash
+# Service Registry Configuration
+export SERVICE_REGISTRY_URL=http://localhost:3005
+export USE_SERVICE_REGISTRY=true
+export USE_DYNAMIC_DISCOVERY=true
+
+# Service Host Configuration
+export SERVICE_HOST=localhost  # Use 'localhost' for local development
+```
 
 ### Auth Service
-- `PORT`: Service port (default: 3001)
-- `SERVICE_NAME`: Service instance name (default: auth-service-1)
+
+**Required:**
+- `PORT`: Service port (e.g., 3001, 3002, 3003, etc.)
+- `SERVICE_NAME`: Service instance name (e.g., `auth-service-1`, `auth-service-2`)
+
+**Optional:**
 - `JWT_SECRET`: Secret key for JWT signing (default: `'your-secret-key-change-in-production'`)
-  - **Important**: All auth service instances MUST use the same `JWT_SECRET`
+  - **Critical**: All auth service instances MUST use the same `JWT_SECRET`
   - Can be set via environment variable, `.env` file, or command line
-  - If set in `.env` file, you don't need to specify it in the command
-- `JWT_EXPIRY`: Token expiration time (default: 24h)
-- `NODE_ENV`: Environment (development/production)
+  - If set globally, you don't need to specify it per instance
+- `JWT_EXPIRY`: Token expiration time (default: `24h`)
+- `NODE_ENV`: Environment mode (default: `development`)
+
+**Example:**
+```bash
+# Set JWT_SECRET globally (recommended)
+export JWT_SECRET=your-secret-key
+
+# Start instances (JWT_SECRET inherited from environment)
+PORT=3001 SERVICE_NAME=auth-service-1 node auth-server.js
+PORT=3002 SERVICE_NAME=auth-service-2 node auth-server.js
+```
 
 ### Data Service
-- `PORT`: Service port (default: 4002 for first instance)
-- `SERVICE_NAME`: Service instance name (default: data-service-1)
-- `SERVICE_HOST`: Service host (default: localhost)
+
+**Required:**
+- `PORT`: Service port (e.g., 4002, 4003, 4004, etc.)
+- `SERVICE_NAME`: Service instance name (e.g., `data-service-1`, `data-service-2`)
+
+**Optional:**
+- `SERVICE_HOST`: Service hostname (default: `localhost`)
+
+**Example:**
+```bash
+PORT=4002 SERVICE_NAME=data-service-1 node data-server.js
+PORT=4003 SERVICE_NAME=data-service-2 node data-server.js
+```
 
 ### Compute Service
-- `PORT`: Service port (default: 5002 for first instance)
-- `SERVICE_NAME`: Service instance name (default: compute-service-1)
-- `SERVICE_HOST`: Service host (default: localhost)
-- `REDIS_HOST`: Redis host for job queue (default: localhost)
-- `REDIS_PORT`: Redis port (default: 6379)
+
+**Required:**
+- `PORT`: Service port (e.g., 5002, 5003, 5004, etc.)
+- `SERVICE_NAME`: Service instance name (e.g., `compute-service-1`, `compute-service-2`)
+
+**Optional:**
+- `SERVICE_HOST`: Service hostname (default: `localhost`)
+- `REDIS_HOST`: Redis host for job queue (default: `localhost`)
+- `REDIS_PORT`: Redis port (default: `6379`)
+
+**Example:**
+```bash
+PORT=5002 SERVICE_NAME=compute-service-1 node compute-server.js
+PORT=5003 SERVICE_NAME=compute-service-2 node compute-server.js
+```
 
 ### Load Balancer
-- `PORT`: Load balancer port (default: 3000)
-- `USE_DYNAMIC_DISCOVERY`: Enable dynamic service discovery (default: true)
-- `SERVICE_REGISTRY_URL`: Service registry URL (default: http://localhost:3005)
-- `SERVICE_HOST`: Service host for static configuration (default: localhost)
-- `AUTH_PORTS`: Comma-separated auth service ports (default: 3001,3002,3003)
-- `DATA_PORTS`: Comma-separated data service ports (default: 4002,4003,4004)
-- `COMPUTE_PORTS`: Comma-separated compute service ports (default: 5002,5003,5004)
+
+**Optional:**
+- `PORT`: Load balancer port (default: `3000`)
+- `USE_DYNAMIC_DISCOVERY`: Enable dynamic service discovery (default: `true`)
+- `SERVICE_REGISTRY_URL`: Service registry URL (default: `http://localhost:3005`)
+- `SERVICE_HOST`: Service host for static configuration (default: `localhost`)
+- `AUTH_PORTS`: Comma-separated auth service ports (only used if `USE_DYNAMIC_DISCOVERY=false`)
+- `DATA_PORTS`: Comma-separated data service ports (only used if `USE_DYNAMIC_DISCOVERY=false`)
+- `COMPUTE_PORTS`: Comma-separated compute service ports (only used if `USE_DYNAMIC_DISCOVERY=false`)
+
+**Example:**
+```bash
+# Dynamic discovery (recommended)
+PORT=3000 node load-balancer.js
+
+# Static configuration (if dynamic discovery disabled)
+USE_DYNAMIC_DISCOVERY=false AUTH_PORTS=3001,3002,3003 DATA_PORTS=4002,4003,4004 COMPUTE_PORTS=5002,5003,5004 node load-balancer.js
+```
 
 ### Service Registry
-- `PORT`: Registry port (default: 3005)
+
+**Optional:**
+- `PORT`: Registry port (default: `3005`)
+
+**Example:**
+```bash
+PORT=3005 node registry-server.js
+```
 
 ### Fault Detector
-- `PORT`: Fault detector port (default: 3004)
-- `SERVICE_REGISTRY_URL`: Service registry URL (default: http://localhost:3005)
-- `USE_SERVICE_REGISTRY`: Enable dynamic service discovery (default: true)
+
+**Optional:**
+- `PORT`: Fault detector port (default: `3004`)
+- `SERVICE_REGISTRY_URL`: Service registry URL (default: `http://localhost:3005`)
+- `USE_SERVICE_REGISTRY`: Enable dynamic service discovery (default: `true`)
+- `SERVICE_HOST`: Service hostname (default: `localhost`)
+
+**Example:**
+```bash
+PORT=3004 node fault-detector.js
+```
 
 ### Shared Database
+
+**Optional:**
 - `LOCAL_DB_DIR`: Directory for database file (default: `data/`)
 - `LOCAL_DB_PATH`: Full path to database file (default: `data/local-db.sqlite`)
+
+### Setting Environment Variables
+
+**Option 1: Export in Shell**
+```bash
+export JWT_SECRET=your-secret-key
+export SERVICE_REGISTRY_URL=http://localhost:3005
+```
+
+**Option 2: Use .env File**
+Create a `.env` file in the project root:
+```env
+JWT_SECRET=your-secret-key
+SERVICE_REGISTRY_URL=http://localhost:3005
+USE_SERVICE_REGISTRY=true
+```
+
+**Option 3: Inline with Command**
+```bash
+PORT=3001 SERVICE_NAME=auth-service-1 JWT_SECRET=your-secret-key node auth-server.js
+```
+
+**Note:** The startup scripts (`start-3-instances.sh` and `start-10-instances.sh`) handle all environment variables automatically. You only need to set them manually if starting services individually.
 
 ---
 
 ## Testing Multiple Instances
 
-The system is configured to run 3 instances of each service by default:
+The system can run with either 3 or 10 instances of each service:
+
+### 3 Instances Configuration (Default)
 - **Auth Service**: Ports 3001, 3002, 3003
 - **Data Service**: Ports 4002, 4003, 4004
 - **Compute Service**: Ports 5002, 5003, 5004
+
+### 10 Instances Configuration (Load Testing)
+- **Auth Service**: Ports 3001-3010
+- **Data Service**: Ports 4002-4011
+- **Compute Service**: Ports 5002-5011
 
 ### Quick Test with Multiple Instances
 
